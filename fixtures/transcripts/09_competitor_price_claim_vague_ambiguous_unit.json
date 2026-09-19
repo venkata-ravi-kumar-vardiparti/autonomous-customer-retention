@@ -1,0 +1,11 @@
+{
+  "call_id": "CALL_****1009",
+  "locale": "en-US",
+  "window_start_ts": "2026-09-19T14:40:00Z",
+  "guardrail_flags": [],
+  "transcript_window": [
+    {"ts": "2026-09-19T14:40:02Z", "speaker": "customer", "text": "I saw some other carrier advertising like 90 bucks a month for a family plan or something, way cheaper than what I'm paying."},
+    {"ts": "2026-09-19T14:40:11Z", "speaker": "agent", "text": "Do you recall which carrier that was, or how many lines the $90 covered?"},
+    {"ts": "2026-09-19T14:40:18Z", "speaker": "customer", "text": "Not really sure, I just remember seeing it somewhere."}
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "additionalProperties": false,
+  "description": "Request envelope: tracing, invocation context, and the payload.",
+  "properties": {
+    "attempt": {
+      "minimum": 1,
+      "title": "Attempt",
+      "type": "integer"
+    },
+    "call_id": {
+      "title": "Call Id",
+      "type": "string"
+    },
+    "deadline_ms": {
+      "minimum": 0,
+      "title": "Deadline Ms",
+      "type": "integer"
+    },
+    "invoked_by": {
+      "title": "Invoked By",
+      "type": "string"
+    },
+    "parent_span_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Parent Span Id"
+    },
+    "payload": {
+      "title": "Payload"
+    },
+    "policy_pack_version": {
+      "title": "Policy Pack Version",
+      "type": "string"
+    },
+    "redaction_level": {
+      "title": "Redaction Level",
+      "type": "string"
+    },
+    "span_id": {
+      "title": "Span Id",
+      "type": "string"
+    },
+    "trace_id": {
+      "title": "Trace Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "trace_id",
+    "span_id",
+    "parent_span_id",
+    "call_id",
+    "invoked_by",
+    "policy_pack_version",
+    "redaction_level",
+    "deadline_ms",
+    "attempt",
+    "payload"
+  ],
+  "title": "AgentEnvelope",
+  "type": "object"
+}

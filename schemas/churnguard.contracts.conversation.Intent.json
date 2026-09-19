@@ -1,0 +1,42 @@
+{
+  "additionalProperties": false,
+  "description": "A customer or agent intent detected in the transcript window.",
+  "properties": {
+    "confidence": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Scope"
+    },
+    "span_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Span Refs",
+      "type": "array"
+    },
+    "type": {
+      "title": "Type",
+      "type": "string"
+    }
+  },
+  "required": [
+    "type",
+    "confidence",
+    "scope",
+    "span_refs"
+  ],
+  "title": "Intent",
+  "type": "object"
+}

@@ -1,0 +1,44 @@
+{
+  "additionalProperties": false,
+  "description": "A price or offer the customer says a competitor is providing.",
+  "properties": {
+    "carrier": {
+      "title": "Carrier",
+      "type": "string"
+    },
+    "price": {
+      "minimum": 0.0,
+      "title": "Price",
+      "type": "number"
+    },
+    "source": {
+      "title": "Source",
+      "type": "string"
+    },
+    "span_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Span Refs",
+      "type": "array"
+    },
+    "unit": {
+      "enum": [
+        "per_line",
+        "total",
+        "ambiguous"
+      ],
+      "title": "Unit",
+      "type": "string"
+    }
+  },
+  "required": [
+    "carrier",
+    "price",
+    "unit",
+    "source",
+    "span_refs"
+  ],
+  "title": "CompetitorClaim",
+  "type": "object"
+}

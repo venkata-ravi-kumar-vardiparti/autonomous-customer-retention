@@ -1,0 +1,25 @@
+{
+  "additionalProperties": false,
+  "description": "A disclosure statement required before an offer can be presented.",
+  "properties": {
+    "code": {
+      "title": "Code",
+      "type": "string"
+    },
+    "must_be_read_verbatim": {
+      "title": "Must Be Read Verbatim",
+      "type": "boolean"
+    },
+    "text": {
+      "title": "Text",
+      "type": "string"
+    }
+  },
+  "required": [
+    "code",
+    "text",
+    "must_be_read_verbatim"
+  ],
+  "title": "Disclosure",
+  "type": "object"
+}

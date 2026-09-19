@@ -1,0 +1,23 @@
+{
+  "additionalProperties": false,
+  "description": "How disparate competitor prices were made comparable.",
+  "properties": {
+    "assumptions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Assumptions",
+      "type": "array"
+    },
+    "method": {
+      "title": "Method",
+      "type": "string"
+    }
+  },
+  "required": [
+    "method",
+    "assumptions"
+  ],
+  "title": "Normalization",
+  "type": "object"
+}

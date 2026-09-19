@@ -1,0 +1,88 @@
+{
+  "$defs": {
+    "Disclosure": {
+      "additionalProperties": false,
+      "description": "A disclosure statement required before an offer can be presented.",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "must_be_read_verbatim": {
+          "title": "Must Be Read Verbatim",
+          "type": "boolean"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "text",
+        "must_be_read_verbatim"
+      ],
+      "title": "Disclosure",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The policy engine's ruling on one candidate offer.",
+  "properties": {
+    "approval_tier_required": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Approval Tier Required"
+    },
+    "candidate_id": {
+      "title": "Candidate Id",
+      "type": "string"
+    },
+    "constraint_violations": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Constraint Violations",
+      "type": "array"
+    },
+    "governing_rules": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Governing Rules",
+      "type": "array"
+    },
+    "required_disclosures": {
+      "items": {
+        "$ref": "#/$defs/Disclosure"
+      },
+      "title": "Required Disclosures",
+      "type": "array"
+    },
+    "verdict": {
+      "enum": [
+        "pass",
+        "pass_with_disclosure",
+        "blocked"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    }
+  },
+  "required": [
+    "candidate_id",
+    "verdict",
+    "governing_rules",
+    "approval_tier_required",
+    "required_disclosures",
+    "constraint_violations"
+  ],
+  "title": "Verdict",
+  "type": "object"
+}

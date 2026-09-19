@@ -1,0 +1,10 @@
+{
+  "call_id": "CALL_****1004",
+  "locale": "en-US",
+  "window_start_ts": "2026-09-19T14:15:00Z",
+  "guardrail_flags": [],
+  "transcript_window": [
+    {"ts": "2026-09-19T14:15:02Z", "speaker": "customer", "text": "I'm moving out of the country next month, so I need to cancel my line."},
+    {"ts": "2026-09-19T14:15:10Z", "speaker": "agent", "text": "Understood — congratulations on the move. Let's get your account details pulled up."}
+  ]
+}

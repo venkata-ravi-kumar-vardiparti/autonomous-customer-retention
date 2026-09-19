@@ -1,0 +1,11 @@
+{
+  "call_id": "CALL_****1012",
+  "locale": "en-US",
+  "window_start_ts": "2026-09-19T14:55:00Z",
+  "guardrail_flags": [],
+  "transcript_window": [
+    {"ts": "2026-09-19T14:55:02Z", "speaker": "customer", "text": "This is ridiculous, this is the third time I've called about this bill and I'm done."},
+    {"ts": "2026-09-19T14:55:10Z", "speaker": "agent", "text": "I completely understand the frustration, and I'm sorry for the repeat calls. Let me pull up the full history right now."},
+    {"ts": "2026-09-19T14:55:22Z", "speaker": "customer", "text": "...okay, thank you, I appreciate you actually looking into it this time."}
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "additionalProperties": false,
+  "description": "A single field the approving agent changed before approving.",
+  "properties": {
+    "component_code": {
+      "title": "Component Code",
+      "type": "string"
+    },
+    "field": {
+      "title": "Field",
+      "type": "string"
+    },
+    "new_value": {
+      "title": "New Value",
+      "type": "string"
+    },
+    "old_value": {
+      "title": "Old Value",
+      "type": "string"
+    }
+  },
+  "required": [
+    "component_code",
+    "field",
+    "old_value",
+    "new_value"
+  ],
+  "title": "OfferEdit",
+  "type": "object"
+}

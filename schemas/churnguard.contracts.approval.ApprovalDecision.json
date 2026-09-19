@@ -1,0 +1,107 @@
+{
+  "$defs": {
+    "OfferEdit": {
+      "additionalProperties": false,
+      "description": "A single field the approving agent changed before approving.",
+      "properties": {
+        "component_code": {
+          "title": "Component Code",
+          "type": "string"
+        },
+        "field": {
+          "title": "Field",
+          "type": "string"
+        },
+        "new_value": {
+          "title": "New Value",
+          "type": "string"
+        },
+        "old_value": {
+          "title": "Old Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "component_code",
+        "field",
+        "old_value",
+        "new_value"
+      ],
+      "title": "OfferEdit",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The human approver's decision on a RecommendationSet.",
+  "properties": {
+    "approved_at": {
+      "format": "date-time",
+      "title": "Approved At",
+      "type": "string"
+    },
+    "approver_ref": {
+      "title": "Approver Ref",
+      "type": "string"
+    },
+    "approver_tier": {
+      "minimum": 0,
+      "title": "Approver Tier",
+      "type": "integer"
+    },
+    "decision": {
+      "enum": [
+        "approved",
+        "rejected",
+        "escalated"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "disclosures_read": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Disclosures Read",
+      "type": "array"
+    },
+    "edits": {
+      "items": {
+        "$ref": "#/$defs/OfferEdit"
+      },
+      "title": "Edits",
+      "type": "array"
+    },
+    "policy_pack_version": {
+      "title": "Policy Pack Version",
+      "type": "string"
+    },
+    "recommendation_set_id": {
+      "title": "Recommendation Set Id",
+      "type": "string"
+    },
+    "selected_offer_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Selected Offer Id"
+    }
+  },
+  "required": [
+    "recommendation_set_id",
+    "decision",
+    "selected_offer_id",
+    "approver_ref",
+    "approver_tier",
+    "approved_at",
+    "edits",
+    "disclosures_read",
+    "policy_pack_version"
+  ],
+  "title": "ApprovalDecision",
+  "type": "object"
+}

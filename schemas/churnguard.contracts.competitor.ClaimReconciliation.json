@@ -1,0 +1,95 @@
+{
+  "$defs": {
+    "CompetitorClaim": {
+      "additionalProperties": false,
+      "description": "A price or offer the customer says a competitor is providing.",
+      "properties": {
+        "carrier": {
+          "title": "Carrier",
+          "type": "string"
+        },
+        "price": {
+          "minimum": 0.0,
+          "title": "Price",
+          "type": "number"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "span_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Span Refs",
+          "type": "array"
+        },
+        "unit": {
+          "enum": [
+            "per_line",
+            "total",
+            "ambiguous"
+          ],
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "carrier",
+        "price",
+        "unit",
+        "source",
+        "span_refs"
+      ],
+      "title": "CompetitorClaim",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Verdict on whether the customer's stated competitor claim holds up.",
+  "properties": {
+    "customer_claim": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CompetitorClaim"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "explanation": {
+      "title": "Explanation",
+      "type": "string"
+    },
+    "resolved_price": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Resolved Price"
+    },
+    "verdict": {
+      "enum": [
+        "confirmed",
+        "overstated",
+        "understated",
+        "unverifiable"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    }
+  },
+  "required": [
+    "customer_claim",
+    "verdict",
+    "resolved_price",
+    "explanation"
+  ],
+  "title": "ClaimReconciliation",
+  "type": "object"
+}

@@ -1,0 +1,20 @@
+{
+  "additionalProperties": false,
+  "description": "A named reason the overall confidence score was moved up or down.",
+  "properties": {
+    "delta": {
+      "title": "Delta",
+      "type": "number"
+    },
+    "reason": {
+      "title": "Reason",
+      "type": "string"
+    }
+  },
+  "required": [
+    "reason",
+    "delta"
+  ],
+  "title": "ConfidenceAdjustment",
+  "type": "object"
+}

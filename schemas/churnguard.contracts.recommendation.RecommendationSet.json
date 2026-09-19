@@ -1,0 +1,379 @@
+{
+  "$defs": {
+    "ApprovalRequirements": {
+      "additionalProperties": false,
+      "description": "What a human approver must do before this set can be acted on.",
+      "properties": {
+        "disclosures_pending": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Disclosures Pending",
+          "type": "array"
+        },
+        "min_tier_required": {
+          "minimum": 0,
+          "title": "Min Tier Required",
+          "type": "integer"
+        },
+        "requires_second_approver": {
+          "title": "Requires Second Approver",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "min_tier_required",
+        "requires_second_approver",
+        "disclosures_pending"
+      ],
+      "title": "ApprovalRequirements",
+      "type": "object"
+    },
+    "BlockedCandidate": {
+      "additionalProperties": false,
+      "description": "A candidate offer the policy engine excluded, and why.",
+      "properties": {
+        "candidate_id": {
+          "title": "Candidate Id",
+          "type": "string"
+        },
+        "governing_rules": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Governing Rules",
+          "type": "array"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_id",
+        "reason",
+        "governing_rules"
+      ],
+      "title": "BlockedCandidate",
+      "type": "object"
+    },
+    "ConfidenceAdjustment": {
+      "additionalProperties": false,
+      "description": "A named reason the overall confidence score was moved up or down.",
+      "properties": {
+        "delta": {
+          "title": "Delta",
+          "type": "number"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "delta"
+      ],
+      "title": "ConfidenceAdjustment",
+      "type": "object"
+    },
+    "CustomerImpact": {
+      "additionalProperties": false,
+      "description": "The bill-level effect of a recommendation, in plain figures.",
+      "properties": {
+        "annualized_delta": {
+          "title": "Annualized Delta",
+          "type": "number"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "monthly_delta": {
+          "title": "Monthly Delta",
+          "type": "number"
+        }
+      },
+      "required": [
+        "monthly_delta",
+        "annualized_delta",
+        "description"
+      ],
+      "title": "CustomerImpact",
+      "type": "object"
+    },
+    "Disclosure": {
+      "additionalProperties": false,
+      "description": "A disclosure statement required before an offer can be presented.",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "must_be_read_verbatim": {
+          "title": "Must Be Read Verbatim",
+          "type": "boolean"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "text",
+        "must_be_read_verbatim"
+      ],
+      "title": "Disclosure",
+      "type": "object"
+    },
+    "OfferComponent": {
+      "additionalProperties": false,
+      "description": "One priced line item within a candidate offer.",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "duration_months": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Duration Months"
+        },
+        "monthly": {
+          "title": "Monthly",
+          "type": "number"
+        }
+      },
+      "required": [
+        "code",
+        "monthly",
+        "duration_months"
+      ],
+      "title": "OfferComponent",
+      "type": "object"
+    },
+    "Recommendation": {
+      "additionalProperties": false,
+      "description": "One ranked, policy-cleared retention offer with rationale.",
+      "properties": {
+        "approval_tier_required": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Approval Tier Required"
+        },
+        "components": {
+          "items": {
+            "$ref": "#/$defs/OfferComponent"
+          },
+          "title": "Components",
+          "type": "array"
+        },
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "customer_impact": {
+          "$ref": "#/$defs/CustomerImpact"
+        },
+        "evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "hold_condition": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Hold Condition"
+        },
+        "offer_id": {
+          "title": "Offer Id",
+          "type": "string"
+        },
+        "rank": {
+          "minimum": 1,
+          "title": "Rank",
+          "type": "integer"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        },
+        "required_disclosures": {
+          "items": {
+            "$ref": "#/$defs/Disclosure"
+          },
+          "title": "Required Disclosures",
+          "type": "array"
+        },
+        "talk_track": {
+          "title": "Talk Track",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rank",
+        "offer_id",
+        "title",
+        "components",
+        "customer_impact",
+        "rationale",
+        "confidence",
+        "approval_tier_required",
+        "required_disclosures",
+        "evidence_ids",
+        "talk_track",
+        "hold_condition"
+      ],
+      "title": "Recommendation",
+      "type": "object"
+    },
+    "TraceContext": {
+      "additionalProperties": false,
+      "description": "Observability echo for audit and debugging.",
+      "properties": {
+        "agent_calls": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Agent Calls",
+          "type": "array"
+        },
+        "span_id": {
+          "title": "Span Id",
+          "type": "string"
+        },
+        "trace_id": {
+          "title": "Trace Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "trace_id",
+        "span_id",
+        "agent_calls"
+      ],
+      "title": "TraceContext",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Structured output of the Supervisor agent for one call.",
+  "properties": {
+    "agent_context_notes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Agent Context Notes",
+      "type": "array"
+    },
+    "approval": {
+      "$ref": "#/$defs/ApprovalRequirements"
+    },
+    "blocked_candidates": {
+      "items": {
+        "$ref": "#/$defs/BlockedCandidate"
+      },
+      "title": "Blocked Candidates",
+      "type": "array"
+    },
+    "call_id": {
+      "title": "Call Id",
+      "type": "string"
+    },
+    "commitment_status": {
+      "const": "none",
+      "title": "Commitment Status",
+      "type": "string"
+    },
+    "confidence_adjustments": {
+      "items": {
+        "$ref": "#/$defs/ConfidenceAdjustment"
+      },
+      "title": "Confidence Adjustments",
+      "type": "array"
+    },
+    "fallbacks_applied": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Fallbacks Applied",
+      "type": "array"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "mandatory_actions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Mandatory Actions",
+      "type": "array"
+    },
+    "overall_confidence": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Overall Confidence",
+      "type": "number"
+    },
+    "recommendation_set_id": {
+      "title": "Recommendation Set Id",
+      "type": "string"
+    },
+    "recommendations": {
+      "items": {
+        "$ref": "#/$defs/Recommendation"
+      },
+      "title": "Recommendations",
+      "type": "array"
+    },
+    "trace": {
+      "$ref": "#/$defs/TraceContext"
+    }
+  },
+  "required": [
+    "recommendation_set_id",
+    "call_id",
+    "generated_at",
+    "overall_confidence",
+    "confidence_adjustments",
+    "recommendations",
+    "mandatory_actions",
+    "blocked_candidates",
+    "agent_context_notes",
+    "fallbacks_applied",
+    "commitment_status",
+    "approval",
+    "trace"
+  ],
+  "title": "RecommendationSet",
+  "type": "object"
+}

@@ -1,0 +1,51 @@
+{
+  "additionalProperties": false,
+  "description": "A single competitor plan, normalized for comparison.",
+  "properties": {
+    "carrier": {
+      "title": "Carrier",
+      "type": "string"
+    },
+    "includes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Includes",
+      "type": "array"
+    },
+    "line_count": {
+      "minimum": 1,
+      "title": "Line Count",
+      "type": "integer"
+    },
+    "monthly_price": {
+      "minimum": 0.0,
+      "title": "Monthly Price",
+      "type": "number"
+    },
+    "normalized_monthly_equivalent": {
+      "minimum": 0.0,
+      "title": "Normalized Monthly Equivalent",
+      "type": "number"
+    },
+    "plan_name": {
+      "title": "Plan Name",
+      "type": "string"
+    },
+    "source_snapshot_id": {
+      "title": "Source Snapshot Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "carrier",
+    "plan_name",
+    "monthly_price",
+    "line_count",
+    "includes",
+    "normalized_monthly_equivalent",
+    "source_snapshot_id"
+  ],
+  "title": "ResolvedCompetitorOffer",
+  "type": "object"
+}

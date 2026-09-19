@@ -1,0 +1,120 @@
+{
+  "$defs": {
+    "CandidateOffer": {
+      "additionalProperties": false,
+      "description": "An unevaluated offer proposal, before policy verdicts are applied.",
+      "properties": {
+        "candidate_id": {
+          "title": "Candidate Id",
+          "type": "string"
+        },
+        "components": {
+          "items": {
+            "$ref": "#/$defs/OfferComponent"
+          },
+          "title": "Components",
+          "type": "array"
+        },
+        "total_monthly_impact": {
+          "title": "Total Monthly Impact",
+          "type": "number"
+        },
+        "type": {
+          "enum": [
+            "bill_credit",
+            "plan_discount",
+            "device_credit",
+            "plan_change",
+            "retention_bundle",
+            "contract_buyout"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_id",
+        "type",
+        "components",
+        "total_monthly_impact"
+      ],
+      "title": "CandidateOffer",
+      "type": "object"
+    },
+    "OfferComponent": {
+      "additionalProperties": false,
+      "description": "One priced line item within a candidate offer.",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "duration_months": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Duration Months"
+        },
+        "monthly": {
+          "title": "Monthly",
+          "type": "number"
+        }
+      },
+      "required": [
+        "code",
+        "monthly",
+        "duration_months"
+      ],
+      "title": "OfferComponent",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Request payload for the deterministic policy engine.",
+  "properties": {
+    "account_digest": {
+      "additionalProperties": true,
+      "title": "Account Digest",
+      "type": "object"
+    },
+    "agent_authority_tier": {
+      "minimum": 0,
+      "title": "Agent Authority Tier",
+      "type": "integer"
+    },
+    "candidate_offers": {
+      "items": {
+        "$ref": "#/$defs/CandidateOffer"
+      },
+      "title": "Candidate Offers",
+      "type": "array"
+    },
+    "channel": {
+      "title": "Channel",
+      "type": "string"
+    },
+    "jurisdiction": {
+      "title": "Jurisdiction",
+      "type": "string"
+    },
+    "policy_pack_version": {
+      "title": "Policy Pack Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "policy_pack_version",
+    "jurisdiction",
+    "channel",
+    "agent_authority_tier",
+    "account_digest",
+    "candidate_offers"
+  ],
+  "title": "PolicyEvaluationRequest",
+  "type": "object"
+}

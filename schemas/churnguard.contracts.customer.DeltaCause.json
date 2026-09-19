@@ -1,0 +1,55 @@
+{
+  "additionalProperties": false,
+  "description": "One attributed cause of a bill-over-bill change.",
+  "properties": {
+    "amount": {
+      "title": "Amount",
+      "type": "number"
+    },
+    "cause": {
+      "title": "Cause",
+      "type": "string"
+    },
+    "event_date": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Event Date"
+    },
+    "evidence_id": {
+      "title": "Evidence Id",
+      "type": "string"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Reason"
+    },
+    "reversible": {
+      "title": "Reversible",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "cause",
+    "amount",
+    "event_date",
+    "reason",
+    "reversible",
+    "evidence_id"
+  ],
+  "title": "DeltaCause",
+  "type": "object"
+}

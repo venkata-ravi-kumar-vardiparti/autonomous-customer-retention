@@ -1,0 +1,11 @@
+{
+  "call_id": "CALL_****1006",
+  "locale": "en-US",
+  "window_start_ts": "2026-09-19T14:25:00Z",
+  "guardrail_flags": [],
+  "transcript_window": [
+    {"ts": "2026-09-19T14:25:02Z", "speaker": "customer", "text": "Hi, I just wanted to check if I'm eligible for a device upgrade soon."},
+    {"ts": "2026-09-19T14:25:09Z", "speaker": "agent", "text": "Happy to check that for you. Are you having any issues with your current plan or service?"},
+    {"ts": "2026-09-19T14:25:16Z", "speaker": "customer", "text": "Nope, everything's been great, just curious about the upgrade timing."}
+  ]
+}

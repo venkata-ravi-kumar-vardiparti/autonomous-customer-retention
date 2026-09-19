@@ -1,0 +1,38 @@
+{
+  "additionalProperties": false,
+  "description": "The customer's current plan and contract terms.",
+  "properties": {
+    "contract_end_date": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Contract End Date"
+    },
+    "contract_type": {
+      "title": "Contract Type",
+      "type": "string"
+    },
+    "plan_code": {
+      "title": "Plan Code",
+      "type": "string"
+    },
+    "plan_name": {
+      "title": "Plan Name",
+      "type": "string"
+    }
+  },
+  "required": [
+    "plan_code",
+    "plan_name",
+    "contract_type",
+    "contract_end_date"
+  ],
+  "title": "PlanProfile",
+  "type": "object"
+}

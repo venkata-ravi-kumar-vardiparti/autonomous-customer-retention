@@ -1,0 +1,333 @@
+{
+  "$defs": {
+    "Billing": {
+      "additionalProperties": false,
+      "description": "Current vs. prior bill, with the delta attributed to specific causes.",
+      "properties": {
+        "current_bill": {
+          "minimum": 0.0,
+          "title": "Current Bill",
+          "type": "number"
+        },
+        "delta": {
+          "title": "Delta",
+          "type": "number"
+        },
+        "delta_attribution": {
+          "items": {
+            "$ref": "#/$defs/DeltaCause"
+          },
+          "title": "Delta Attribution",
+          "type": "array"
+        },
+        "prior_bill": {
+          "minimum": 0.0,
+          "title": "Prior Bill",
+          "type": "number"
+        }
+      },
+      "required": [
+        "current_bill",
+        "prior_bill",
+        "delta",
+        "delta_attribution"
+      ],
+      "title": "Billing",
+      "type": "object"
+    },
+    "DeltaCause": {
+      "additionalProperties": false,
+      "description": "One attributed cause of a bill-over-bill change.",
+      "properties": {
+        "amount": {
+          "title": "Amount",
+          "type": "number"
+        },
+        "cause": {
+          "title": "Cause",
+          "type": "string"
+        },
+        "event_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Event Date"
+        },
+        "evidence_id": {
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reason"
+        },
+        "reversible": {
+          "title": "Reversible",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cause",
+        "amount",
+        "event_date",
+        "reason",
+        "reversible",
+        "evidence_id"
+      ],
+      "title": "DeltaCause",
+      "type": "object"
+    },
+    "DeviceFinancingLine": {
+      "additionalProperties": false,
+      "description": "Outstanding device financing on one line, incl. early-termination cost.",
+      "properties": {
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "early_termination_fee": {
+          "minimum": 0.0,
+          "title": "Early Termination Fee",
+          "type": "number"
+        },
+        "line_ref": {
+          "title": "Line Ref",
+          "type": "string"
+        },
+        "monthly_payment": {
+          "minimum": 0.0,
+          "title": "Monthly Payment",
+          "type": "number"
+        },
+        "months_remaining": {
+          "minimum": 0,
+          "title": "Months Remaining",
+          "type": "integer"
+        },
+        "remaining_balance": {
+          "minimum": 0.0,
+          "title": "Remaining Balance",
+          "type": "number"
+        }
+      },
+      "required": [
+        "line_ref",
+        "device",
+        "remaining_balance",
+        "monthly_payment",
+        "months_remaining",
+        "early_termination_fee"
+      ],
+      "title": "DeviceFinancingLine",
+      "type": "object"
+    },
+    "PaymentHistorySummary": {
+      "additionalProperties": false,
+      "description": "Rolling payment reliability picture used for eligibility checks.",
+      "properties": {
+        "current_past_due": {
+          "minimum": 0.0,
+          "title": "Current Past Due",
+          "type": "number"
+        },
+        "last_late_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Late Date"
+        },
+        "late_count": {
+          "minimum": 0,
+          "title": "Late Count",
+          "type": "integer"
+        },
+        "on_time_count": {
+          "minimum": 0,
+          "title": "On Time Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "on_time_count",
+        "late_count",
+        "last_late_date",
+        "current_past_due"
+      ],
+      "title": "PaymentHistorySummary",
+      "type": "object"
+    },
+    "PlanProfile": {
+      "additionalProperties": false,
+      "description": "The customer's current plan and contract terms.",
+      "properties": {
+        "contract_end_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Contract End Date"
+        },
+        "contract_type": {
+          "title": "Contract Type",
+          "type": "string"
+        },
+        "plan_code": {
+          "title": "Plan Code",
+          "type": "string"
+        },
+        "plan_name": {
+          "title": "Plan Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plan_code",
+        "plan_name",
+        "contract_type",
+        "contract_end_date"
+      ],
+      "title": "PlanProfile",
+      "type": "object"
+    },
+    "VerificationResult": {
+      "additionalProperties": false,
+      "description": "Outcome of a verification task requested against the account.",
+      "properties": {
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Detail"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "task": {
+          "title": "Task",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task",
+        "status",
+        "detail"
+      ],
+      "title": "VerificationResult",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Structured output of the Customer 360 agent for one account.",
+  "properties": {
+    "account_ref": {
+      "title": "Account Ref",
+      "type": "string"
+    },
+    "active_promotions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Active Promotions",
+      "type": "array"
+    },
+    "billing": {
+      "$ref": "#/$defs/Billing"
+    },
+    "device_financing": {
+      "items": {
+        "$ref": "#/$defs/DeviceFinancingLine"
+      },
+      "title": "Device Financing",
+      "type": "array"
+    },
+    "excluded_fields": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Excluded Fields",
+      "type": "array"
+    },
+    "line_count": {
+      "minimum": 0,
+      "title": "Line Count",
+      "type": "integer"
+    },
+    "payment_history": {
+      "$ref": "#/$defs/PaymentHistorySummary"
+    },
+    "plan_profile": {
+      "$ref": "#/$defs/PlanProfile"
+    },
+    "tenure_months": {
+      "minimum": 0,
+      "title": "Tenure Months",
+      "type": "integer"
+    },
+    "usage_by_line": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "title": "Usage By Line",
+      "type": "object"
+    },
+    "verification_results": {
+      "items": {
+        "$ref": "#/$defs/VerificationResult"
+      },
+      "title": "Verification Results",
+      "type": "array"
+    }
+  },
+  "required": [
+    "account_ref",
+    "tenure_months",
+    "line_count",
+    "billing",
+    "payment_history",
+    "device_financing",
+    "plan_profile",
+    "usage_by_line",
+    "active_promotions",
+    "verification_results",
+    "excluded_fields"
+  ],
+  "title": "AccountContext",
+  "type": "object"
+}

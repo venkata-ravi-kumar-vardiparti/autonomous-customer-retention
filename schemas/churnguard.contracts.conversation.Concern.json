@@ -1,0 +1,57 @@
+{
+  "additionalProperties": false,
+  "description": "An unresolved issue the customer raised.",
+  "properties": {
+    "customer_flagged_separate": {
+      "title": "Customer Flagged Separate",
+      "type": "boolean"
+    },
+    "issue": {
+      "title": "Issue",
+      "type": "string"
+    },
+    "line_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Line Ref"
+    },
+    "location": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Location"
+    },
+    "since": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Since"
+    }
+  },
+  "required": [
+    "issue",
+    "line_ref",
+    "location",
+    "since",
+    "customer_flagged_separate"
+  ],
+  "title": "Concern",
+  "type": "object"
+}

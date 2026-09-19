@@ -1,0 +1,30 @@
+{
+  "additionalProperties": false,
+  "description": "A single utterance in the live call transcript.",
+  "properties": {
+    "speaker": {
+      "enum": [
+        "customer",
+        "agent"
+      ],
+      "title": "Speaker",
+      "type": "string"
+    },
+    "text": {
+      "title": "Text",
+      "type": "string"
+    },
+    "ts": {
+      "format": "date-time",
+      "title": "Ts",
+      "type": "string"
+    }
+  },
+  "required": [
+    "ts",
+    "speaker",
+    "text"
+  ],
+  "title": "TranscriptTurn",
+  "type": "object"
+}

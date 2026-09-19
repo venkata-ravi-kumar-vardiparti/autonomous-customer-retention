@@ -1,0 +1,32 @@
+{
+  "additionalProperties": false,
+  "description": "Outcome of a verification task requested against the account.",
+  "properties": {
+    "detail": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Detail"
+    },
+    "status": {
+      "title": "Status",
+      "type": "string"
+    },
+    "task": {
+      "title": "Task",
+      "type": "string"
+    }
+  },
+  "required": [
+    "task",
+    "status",
+    "detail"
+  ],
+  "title": "VerificationResult",
+  "type": "object"
+}

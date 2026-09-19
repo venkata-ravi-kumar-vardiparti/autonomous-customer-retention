@@ -1,0 +1,41 @@
+{
+  "additionalProperties": false,
+  "description": "Rolling payment reliability picture used for eligibility checks.",
+  "properties": {
+    "current_past_due": {
+      "minimum": 0.0,
+      "title": "Current Past Due",
+      "type": "number"
+    },
+    "last_late_date": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Last Late Date"
+    },
+    "late_count": {
+      "minimum": 0,
+      "title": "Late Count",
+      "type": "integer"
+    },
+    "on_time_count": {
+      "minimum": 0,
+      "title": "On Time Count",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "on_time_count",
+    "late_count",
+    "last_late_date",
+    "current_past_due"
+  ],
+  "title": "PaymentHistorySummary",
+  "type": "object"
+}

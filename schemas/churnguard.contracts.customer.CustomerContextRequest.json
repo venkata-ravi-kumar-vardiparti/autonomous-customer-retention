@@ -1,0 +1,50 @@
+{
+  "additionalProperties": false,
+  "description": "Request payload for the Customer 360 agent.",
+  "properties": {
+    "account_ref": {
+      "title": "Account Ref",
+      "type": "string"
+    },
+    "line_refs_of_interest": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Line Refs Of Interest",
+      "type": "array"
+    },
+    "lookback_months": {
+      "minimum": 0,
+      "title": "Lookback Months",
+      "type": "integer"
+    },
+    "reason_code": {
+      "title": "Reason Code",
+      "type": "string"
+    },
+    "requested_domains": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Requested Domains",
+      "type": "array"
+    },
+    "verification_tasks": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Verification Tasks",
+      "type": "array"
+    }
+  },
+  "required": [
+    "account_ref",
+    "requested_domains",
+    "lookback_months",
+    "line_refs_of_interest",
+    "verification_tasks",
+    "reason_code"
+  ],
+  "title": "CustomerContextRequest",
+  "type": "object"
+}

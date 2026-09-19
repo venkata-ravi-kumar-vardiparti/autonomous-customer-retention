@@ -1,0 +1,56 @@
+{
+  "$defs": {
+    "ExecutionOperation": {
+      "additionalProperties": false,
+      "description": "One atomic operation the execution service must carry out.",
+      "properties": {
+        "op_code": {
+          "title": "Op Code",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": true,
+          "title": "Params",
+          "type": "object"
+        }
+      },
+      "required": [
+        "op_code",
+        "params"
+      ],
+      "title": "ExecutionOperation",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Handoff payload from approval to the (out-of-scope) execution service.",
+  "properties": {
+    "account_ref": {
+      "title": "Account Ref",
+      "type": "string"
+    },
+    "approval_ref": {
+      "title": "Approval Ref",
+      "type": "string"
+    },
+    "idempotency_key": {
+      "title": "Idempotency Key",
+      "type": "string"
+    },
+    "operations": {
+      "items": {
+        "$ref": "#/$defs/ExecutionOperation"
+      },
+      "title": "Operations",
+      "type": "array"
+    }
+  },
+  "required": [
+    "approval_ref",
+    "account_ref",
+    "operations",
+    "idempotency_key"
+  ],
+  "title": "ExecutionRequest",
+  "type": "object"
+}

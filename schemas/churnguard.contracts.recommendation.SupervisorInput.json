@@ -1,0 +1,91 @@
+{
+  "$defs": {
+    "TranscriptTurn": {
+      "additionalProperties": false,
+      "description": "A single utterance in the live call transcript.",
+      "properties": {
+        "speaker": {
+          "enum": [
+            "customer",
+            "agent"
+          ],
+          "title": "Speaker",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "ts": {
+          "format": "date-time",
+          "title": "Ts",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ts",
+        "speaker",
+        "text"
+      ],
+      "title": "TranscriptTurn",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Request payload for the Supervisor agent.",
+  "properties": {
+    "account_ref": {
+      "title": "Account Ref",
+      "type": "string"
+    },
+    "agent_authority_tier": {
+      "minimum": 0,
+      "title": "Agent Authority Tier",
+      "type": "integer"
+    },
+    "agent_ref": {
+      "title": "Agent Ref",
+      "type": "string"
+    },
+    "call_id": {
+      "title": "Call Id",
+      "type": "string"
+    },
+    "deadline_ms": {
+      "minimum": 0,
+      "title": "Deadline Ms",
+      "type": "integer"
+    },
+    "orchestration_mode": {
+      "enum": [
+        "bounded_pipeline",
+        "open_harness"
+      ],
+      "title": "Orchestration Mode",
+      "type": "string"
+    },
+    "policy_pack_version": {
+      "title": "Policy Pack Version",
+      "type": "string"
+    },
+    "transcript_window": {
+      "items": {
+        "$ref": "#/$defs/TranscriptTurn"
+      },
+      "title": "Transcript Window",
+      "type": "array"
+    }
+  },
+  "required": [
+    "call_id",
+    "account_ref",
+    "transcript_window",
+    "agent_authority_tier",
+    "agent_ref",
+    "deadline_ms",
+    "policy_pack_version",
+    "orchestration_mode"
+  ],
+  "title": "SupervisorInput",
+  "type": "object"
+}

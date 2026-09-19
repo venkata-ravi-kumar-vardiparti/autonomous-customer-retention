@@ -1,0 +1,29 @@
+{
+  "additionalProperties": false,
+  "description": "A number the customer stated about their own account (bill, usage, etc.).",
+  "properties": {
+    "field": {
+      "title": "Field",
+      "type": "string"
+    },
+    "precision": {
+      "enum": [
+        "exact",
+        "approximate"
+      ],
+      "title": "Precision",
+      "type": "string"
+    },
+    "value": {
+      "title": "Value",
+      "type": "number"
+    }
+  },
+  "required": [
+    "field",
+    "value",
+    "precision"
+  ],
+  "title": "StatedFigure",
+  "type": "object"
+}

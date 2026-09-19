@@ -1,0 +1,25 @@
+{
+  "additionalProperties": false,
+  "description": "The bill-level effect of a recommendation, in plain figures.",
+  "properties": {
+    "annualized_delta": {
+      "title": "Annualized Delta",
+      "type": "number"
+    },
+    "description": {
+      "title": "Description",
+      "type": "string"
+    },
+    "monthly_delta": {
+      "title": "Monthly Delta",
+      "type": "number"
+    }
+  },
+  "required": [
+    "monthly_delta",
+    "annualized_delta",
+    "description"
+  ],
+  "title": "CustomerImpact",
+  "type": "object"
+}

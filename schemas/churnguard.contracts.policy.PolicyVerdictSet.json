@@ -1,0 +1,183 @@
+{
+  "$defs": {
+    "ComputedLimits": {
+      "additionalProperties": false,
+      "description": "Ceilings the policy pack derived for this account/channel/tier.",
+      "properties": {
+        "agent_authority_ceiling": {
+          "minimum": 0,
+          "title": "Agent Authority Ceiling",
+          "type": "integer"
+        },
+        "max_bundle_duration_months": {
+          "minimum": 0,
+          "title": "Max Bundle Duration Months",
+          "type": "integer"
+        },
+        "max_discount_pct": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Max Discount Pct",
+          "type": "number"
+        },
+        "max_monthly_credit": {
+          "minimum": 0.0,
+          "title": "Max Monthly Credit",
+          "type": "number"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "max_discount_pct",
+        "max_monthly_credit",
+        "max_bundle_duration_months",
+        "agent_authority_ceiling",
+        "notes"
+      ],
+      "title": "ComputedLimits",
+      "type": "object"
+    },
+    "Disclosure": {
+      "additionalProperties": false,
+      "description": "A disclosure statement required before an offer can be presented.",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "must_be_read_verbatim": {
+          "title": "Must Be Read Verbatim",
+          "type": "boolean"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "text",
+        "must_be_read_verbatim"
+      ],
+      "title": "Disclosure",
+      "type": "object"
+    },
+    "Verdict": {
+      "additionalProperties": false,
+      "description": "The policy engine's ruling on one candidate offer.",
+      "properties": {
+        "approval_tier_required": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Approval Tier Required"
+        },
+        "candidate_id": {
+          "title": "Candidate Id",
+          "type": "string"
+        },
+        "constraint_violations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Constraint Violations",
+          "type": "array"
+        },
+        "governing_rules": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Governing Rules",
+          "type": "array"
+        },
+        "required_disclosures": {
+          "items": {
+            "$ref": "#/$defs/Disclosure"
+          },
+          "title": "Required Disclosures",
+          "type": "array"
+        },
+        "verdict": {
+          "enum": [
+            "pass",
+            "pass_with_disclosure",
+            "blocked"
+          ],
+          "title": "Verdict",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_id",
+        "verdict",
+        "governing_rules",
+        "approval_tier_required",
+        "required_disclosures",
+        "constraint_violations"
+      ],
+      "title": "Verdict",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Structured output of the Offer Policy agent for one evaluation.",
+  "properties": {
+    "computed_limits": {
+      "$ref": "#/$defs/ComputedLimits"
+    },
+    "evaluated_at": {
+      "format": "date-time",
+      "title": "Evaluated At",
+      "type": "string"
+    },
+    "evaluation_mode": {
+      "const": "deterministic",
+      "title": "Evaluation Mode",
+      "type": "string"
+    },
+    "policy_pack_hash": {
+      "title": "Policy Pack Hash",
+      "type": "string"
+    },
+    "policy_pack_version": {
+      "title": "Policy Pack Version",
+      "type": "string"
+    },
+    "prohibited_actions_triggered": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Prohibited Actions Triggered",
+      "type": "array"
+    },
+    "verdicts": {
+      "items": {
+        "$ref": "#/$defs/Verdict"
+      },
+      "title": "Verdicts",
+      "type": "array"
+    }
+  },
+  "required": [
+    "policy_pack_version",
+    "policy_pack_hash",
+    "evaluated_at",
+    "evaluation_mode",
+    "computed_limits",
+    "verdicts",
+    "prohibited_actions_triggered"
+  ],
+  "title": "PolicyVerdictSet",
+  "type": "object"
+}

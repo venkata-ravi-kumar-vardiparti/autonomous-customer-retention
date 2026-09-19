@@ -1,0 +1,40 @@
+{
+  "additionalProperties": false,
+  "description": "One-time costs the customer would incur by switching carriers.",
+  "properties": {
+    "activation_fees": {
+      "minimum": 0.0,
+      "title": "Activation Fees",
+      "type": "number"
+    },
+    "device_payoff_total": {
+      "minimum": 0.0,
+      "title": "Device Payoff Total",
+      "type": "number"
+    },
+    "early_termination_fees_total": {
+      "minimum": 0.0,
+      "title": "Early Termination Fees Total",
+      "type": "number"
+    },
+    "other_costs": {
+      "minimum": 0.0,
+      "title": "Other Costs",
+      "type": "number"
+    },
+    "total": {
+      "minimum": 0.0,
+      "title": "Total",
+      "type": "number"
+    }
+  },
+  "required": [
+    "device_payoff_total",
+    "early_termination_fees_total",
+    "activation_fees",
+    "other_costs",
+    "total"
+  ],
+  "title": "SwitchingCosts",
+  "type": "object"
+}

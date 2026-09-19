@@ -1,0 +1,11 @@
+{
+  "call_id": "CALL_****1010",
+  "locale": "en-US",
+  "window_start_ts": "2026-09-19T14:45:00Z",
+  "guardrail_flags": ["low_confidence_transcription", "possible_call_drop"],
+  "transcript_window": [
+    {"ts": "2026-09-19T14:45:02Z", "speaker": "customer", "text": "[no audio detected]"},
+    {"ts": "2026-09-19T14:45:20Z", "speaker": "agent", "text": "Hello? I'm having trouble hearing you, are you still there?"},
+    {"ts": "2026-09-19T14:45:35Z", "speaker": "customer", "text": "[static] [call dropped]"}
+  ]
+}

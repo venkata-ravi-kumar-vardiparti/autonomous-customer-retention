@@ -1,0 +1,179 @@
+{
+  "$defs": {
+    "CustomerImpact": {
+      "additionalProperties": false,
+      "description": "The bill-level effect of a recommendation, in plain figures.",
+      "properties": {
+        "annualized_delta": {
+          "title": "Annualized Delta",
+          "type": "number"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "monthly_delta": {
+          "title": "Monthly Delta",
+          "type": "number"
+        }
+      },
+      "required": [
+        "monthly_delta",
+        "annualized_delta",
+        "description"
+      ],
+      "title": "CustomerImpact",
+      "type": "object"
+    },
+    "Disclosure": {
+      "additionalProperties": false,
+      "description": "A disclosure statement required before an offer can be presented.",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "must_be_read_verbatim": {
+          "title": "Must Be Read Verbatim",
+          "type": "boolean"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "text",
+        "must_be_read_verbatim"
+      ],
+      "title": "Disclosure",
+      "type": "object"
+    },
+    "OfferComponent": {
+      "additionalProperties": false,
+      "description": "One priced line item within a candidate offer.",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "duration_months": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Duration Months"
+        },
+        "monthly": {
+          "title": "Monthly",
+          "type": "number"
+        }
+      },
+      "required": [
+        "code",
+        "monthly",
+        "duration_months"
+      ],
+      "title": "OfferComponent",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "One ranked, policy-cleared retention offer with rationale.",
+  "properties": {
+    "approval_tier_required": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Approval Tier Required"
+    },
+    "components": {
+      "items": {
+        "$ref": "#/$defs/OfferComponent"
+      },
+      "title": "Components",
+      "type": "array"
+    },
+    "confidence": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "customer_impact": {
+      "$ref": "#/$defs/CustomerImpact"
+    },
+    "evidence_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Evidence Ids",
+      "type": "array"
+    },
+    "hold_condition": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Hold Condition"
+    },
+    "offer_id": {
+      "title": "Offer Id",
+      "type": "string"
+    },
+    "rank": {
+      "minimum": 1,
+      "title": "Rank",
+      "type": "integer"
+    },
+    "rationale": {
+      "title": "Rationale",
+      "type": "string"
+    },
+    "required_disclosures": {
+      "items": {
+        "$ref": "#/$defs/Disclosure"
+      },
+      "title": "Required Disclosures",
+      "type": "array"
+    },
+    "talk_track": {
+      "title": "Talk Track",
+      "type": "string"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    }
+  },
+  "required": [
+    "rank",
+    "offer_id",
+    "title",
+    "components",
+    "customer_impact",
+    "rationale",
+    "confidence",
+    "approval_tier_required",
+    "required_disclosures",
+    "evidence_ids",
+    "talk_track",
+    "hold_condition"
+  ],
+  "title": "Recommendation",
+  "type": "object"
+}

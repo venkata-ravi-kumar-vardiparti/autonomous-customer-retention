@@ -1,0 +1,21 @@
+{
+  "additionalProperties": false,
+  "description": "One atomic operation the execution service must carry out.",
+  "properties": {
+    "op_code": {
+      "title": "Op Code",
+      "type": "string"
+    },
+    "params": {
+      "additionalProperties": true,
+      "title": "Params",
+      "type": "object"
+    }
+  },
+  "required": [
+    "op_code",
+    "params"
+  ],
+  "title": "ExecutionOperation",
+  "type": "object"
+}

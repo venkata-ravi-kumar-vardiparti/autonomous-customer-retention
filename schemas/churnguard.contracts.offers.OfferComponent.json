@@ -1,0 +1,32 @@
+{
+  "additionalProperties": false,
+  "description": "One priced line item within a candidate offer.",
+  "properties": {
+    "code": {
+      "title": "Code",
+      "type": "string"
+    },
+    "duration_months": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Duration Months"
+    },
+    "monthly": {
+      "title": "Monthly",
+      "type": "number"
+    }
+  },
+  "required": [
+    "code",
+    "monthly",
+    "duration_months"
+  ],
+  "title": "OfferComponent",
+  "type": "object"
+}

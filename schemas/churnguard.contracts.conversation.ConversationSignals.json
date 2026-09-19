@@ -1,0 +1,262 @@
+{
+  "$defs": {
+    "ChurnSignal": {
+      "additionalProperties": false,
+      "description": "An indicator that the customer is at risk of cancelling.",
+      "properties": {
+        "signal": {
+          "title": "Signal",
+          "type": "string"
+        },
+        "strength": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Strength",
+          "type": "string"
+        }
+      },
+      "required": [
+        "signal",
+        "strength"
+      ],
+      "title": "ChurnSignal",
+      "type": "object"
+    },
+    "CompetitorClaim": {
+      "additionalProperties": false,
+      "description": "A price or offer the customer says a competitor is providing.",
+      "properties": {
+        "carrier": {
+          "title": "Carrier",
+          "type": "string"
+        },
+        "price": {
+          "minimum": 0.0,
+          "title": "Price",
+          "type": "number"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "span_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Span Refs",
+          "type": "array"
+        },
+        "unit": {
+          "enum": [
+            "per_line",
+            "total",
+            "ambiguous"
+          ],
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "carrier",
+        "price",
+        "unit",
+        "source",
+        "span_refs"
+      ],
+      "title": "CompetitorClaim",
+      "type": "object"
+    },
+    "Concern": {
+      "additionalProperties": false,
+      "description": "An unresolved issue the customer raised.",
+      "properties": {
+        "customer_flagged_separate": {
+          "title": "Customer Flagged Separate",
+          "type": "boolean"
+        },
+        "issue": {
+          "title": "Issue",
+          "type": "string"
+        },
+        "line_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Line Ref"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Location"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Since"
+        }
+      },
+      "required": [
+        "issue",
+        "line_ref",
+        "location",
+        "since",
+        "customer_flagged_separate"
+      ],
+      "title": "Concern",
+      "type": "object"
+    },
+    "Intent": {
+      "additionalProperties": false,
+      "description": "A customer or agent intent detected in the transcript window.",
+      "properties": {
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Scope"
+        },
+        "span_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Span Refs",
+          "type": "array"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "confidence",
+        "scope",
+        "span_refs"
+      ],
+      "title": "Intent",
+      "type": "object"
+    },
+    "StatedFigure": {
+      "additionalProperties": false,
+      "description": "A number the customer stated about their own account (bill, usage, etc.).",
+      "properties": {
+        "field": {
+          "title": "Field",
+          "type": "string"
+        },
+        "precision": {
+          "enum": [
+            "exact",
+            "approximate"
+          ],
+          "title": "Precision",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        }
+      },
+      "required": [
+        "field",
+        "value",
+        "precision"
+      ],
+      "title": "StatedFigure",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Structured output of the Conversation agent for one transcript window.",
+  "properties": {
+    "churn_signals": {
+      "items": {
+        "$ref": "#/$defs/ChurnSignal"
+      },
+      "title": "Churn Signals",
+      "type": "array"
+    },
+    "competitor_claims": {
+      "items": {
+        "$ref": "#/$defs/CompetitorClaim"
+      },
+      "title": "Competitor Claims",
+      "type": "array"
+    },
+    "customer_stated_figures": {
+      "items": {
+        "$ref": "#/$defs/StatedFigure"
+      },
+      "title": "Customer Stated Figures",
+      "type": "array"
+    },
+    "intents": {
+      "items": {
+        "$ref": "#/$defs/Intent"
+      },
+      "title": "Intents",
+      "type": "array"
+    },
+    "sentiment_trajectory": {
+      "title": "Sentiment Trajectory",
+      "type": "string"
+    },
+    "unresolved_concerns": {
+      "items": {
+        "$ref": "#/$defs/Concern"
+      },
+      "title": "Unresolved Concerns",
+      "type": "array"
+    },
+    "verification_tasks": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Verification Tasks",
+      "type": "array"
+    }
+  },
+  "required": [
+    "intents",
+    "churn_signals",
+    "competitor_claims",
+    "customer_stated_figures",
+    "unresolved_concerns",
+    "sentiment_trajectory",
+    "verification_tasks"
+  ],
+  "title": "ConversationSignals",
+  "type": "object"
+}

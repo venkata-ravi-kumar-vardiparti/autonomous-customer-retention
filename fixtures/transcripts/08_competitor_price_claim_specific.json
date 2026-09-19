@@ -1,0 +1,10 @@
+{
+  "call_id": "CALL_****1008",
+  "locale": "en-US",
+  "window_start_ts": "2026-09-19T14:35:00Z",
+  "guardrail_flags": [],
+  "transcript_window": [
+    {"ts": "2026-09-19T14:35:02Z", "speaker": "customer", "text": "RivalCo is offering me unlimited data for $45 a line, and I've got 3 lines. I'm switching unless you can match it."},
+    {"ts": "2026-09-19T14:35:12Z", "speaker": "agent", "text": "Let me verify that against current market pricing and see what I can do."}
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "additionalProperties": false,
+  "description": "Observability echo for audit and debugging.",
+  "properties": {
+    "agent_calls": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Agent Calls",
+      "type": "array"
+    },
+    "span_id": {
+      "title": "Span Id",
+      "type": "string"
+    },
+    "trace_id": {
+      "title": "Trace Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "trace_id",
+    "span_id",
+    "agent_calls"
+  ],
+  "title": "TraceContext",
+  "type": "object"
+}

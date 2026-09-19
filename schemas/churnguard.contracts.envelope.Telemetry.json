@@ -1,0 +1,44 @@
+{
+  "additionalProperties": false,
+  "description": "Per-call cost/latency accounting attached to every AgentResult.",
+  "properties": {
+    "cache_hit": {
+      "title": "Cache Hit",
+      "type": "boolean"
+    },
+    "cost_usd": {
+      "minimum": 0,
+      "title": "Cost Usd",
+      "type": "number"
+    },
+    "latency_ms": {
+      "minimum": 0,
+      "title": "Latency Ms",
+      "type": "integer"
+    },
+    "model": {
+      "title": "Model",
+      "type": "string"
+    },
+    "tokens_in": {
+      "minimum": 0,
+      "title": "Tokens In",
+      "type": "integer"
+    },
+    "tokens_out": {
+      "minimum": 0,
+      "title": "Tokens Out",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "model",
+    "latency_ms",
+    "tokens_in",
+    "tokens_out",
+    "cost_usd",
+    "cache_hit"
+  ],
+  "title": "Telemetry",
+  "type": "object"
+}

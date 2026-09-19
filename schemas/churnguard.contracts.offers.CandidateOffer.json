@@ -1,0 +1,75 @@
+{
+  "$defs": {
+    "OfferComponent": {
+      "additionalProperties": false,
+      "description": "One priced line item within a candidate offer.",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "duration_months": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Duration Months"
+        },
+        "monthly": {
+          "title": "Monthly",
+          "type": "number"
+        }
+      },
+      "required": [
+        "code",
+        "monthly",
+        "duration_months"
+      ],
+      "title": "OfferComponent",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "An unevaluated offer proposal, before policy verdicts are applied.",
+  "properties": {
+    "candidate_id": {
+      "title": "Candidate Id",
+      "type": "string"
+    },
+    "components": {
+      "items": {
+        "$ref": "#/$defs/OfferComponent"
+      },
+      "title": "Components",
+      "type": "array"
+    },
+    "total_monthly_impact": {
+      "title": "Total Monthly Impact",
+      "type": "number"
+    },
+    "type": {
+      "enum": [
+        "bill_credit",
+        "plan_discount",
+        "device_credit",
+        "plan_change",
+        "retention_bundle",
+        "contract_buyout"
+      ],
+      "title": "Type",
+      "type": "string"
+    }
+  },
+  "required": [
+    "candidate_id",
+    "type",
+    "components",
+    "total_monthly_impact"
+  ],
+  "title": "CandidateOffer",
+  "type": "object"
+}

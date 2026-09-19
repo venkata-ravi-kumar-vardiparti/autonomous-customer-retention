@@ -1,0 +1,44 @@
+{
+  "additionalProperties": false,
+  "description": "Outstanding device financing on one line, incl. early-termination cost.",
+  "properties": {
+    "device": {
+      "title": "Device",
+      "type": "string"
+    },
+    "early_termination_fee": {
+      "minimum": 0.0,
+      "title": "Early Termination Fee",
+      "type": "number"
+    },
+    "line_ref": {
+      "title": "Line Ref",
+      "type": "string"
+    },
+    "monthly_payment": {
+      "minimum": 0.0,
+      "title": "Monthly Payment",
+      "type": "number"
+    },
+    "months_remaining": {
+      "minimum": 0,
+      "title": "Months Remaining",
+      "type": "integer"
+    },
+    "remaining_balance": {
+      "minimum": 0.0,
+      "title": "Remaining Balance",
+      "type": "number"
+    }
+  },
+  "required": [
+    "line_ref",
+    "device",
+    "remaining_balance",
+    "monthly_payment",
+    "months_remaining",
+    "early_termination_fee"
+  ],
+  "title": "DeviceFinancingLine",
+  "type": "object"
+}

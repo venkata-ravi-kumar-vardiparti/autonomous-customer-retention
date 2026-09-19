@@ -1,0 +1,46 @@
+{
+  "additionalProperties": false,
+  "description": "Pointer to the governed-data-layer record backing a claim.",
+  "properties": {
+    "as_of": {
+      "format": "date-time",
+      "title": "As Of",
+      "type": "string"
+    },
+    "evidence_id": {
+      "title": "Evidence Id",
+      "type": "string"
+    },
+    "freshness": {
+      "enum": [
+        "fresh",
+        "aging",
+        "stale"
+      ],
+      "title": "Freshness",
+      "type": "string"
+    },
+    "masked": {
+      "title": "Masked",
+      "type": "boolean"
+    },
+    "record_ref": {
+      "title": "Record Ref",
+      "type": "string"
+    },
+    "source_system": {
+      "title": "Source System",
+      "type": "string"
+    }
+  },
+  "required": [
+    "evidence_id",
+    "source_system",
+    "record_ref",
+    "as_of",
+    "freshness",
+    "masked"
+  ],
+  "title": "EvidenceRef",
+  "type": "object"
+}

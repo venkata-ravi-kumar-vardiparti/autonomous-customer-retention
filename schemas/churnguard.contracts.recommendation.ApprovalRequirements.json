@@ -1,0 +1,29 @@
+{
+  "additionalProperties": false,
+  "description": "What a human approver must do before this set can be acted on.",
+  "properties": {
+    "disclosures_pending": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Disclosures Pending",
+      "type": "array"
+    },
+    "min_tier_required": {
+      "minimum": 0,
+      "title": "Min Tier Required",
+      "type": "integer"
+    },
+    "requires_second_approver": {
+      "title": "Requires Second Approver",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "min_tier_required",
+    "requires_second_approver",
+    "disclosures_pending"
+  ],
+  "title": "ApprovalRequirements",
+  "type": "object"
+}

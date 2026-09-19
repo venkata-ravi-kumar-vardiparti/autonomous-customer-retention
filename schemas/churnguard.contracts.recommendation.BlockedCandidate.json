@@ -1,0 +1,28 @@
+{
+  "additionalProperties": false,
+  "description": "A candidate offer the policy engine excluded, and why.",
+  "properties": {
+    "candidate_id": {
+      "title": "Candidate Id",
+      "type": "string"
+    },
+    "governing_rules": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Governing Rules",
+      "type": "array"
+    },
+    "reason": {
+      "title": "Reason",
+      "type": "string"
+    }
+  },
+  "required": [
+    "candidate_id",
+    "reason",
+    "governing_rules"
+  ],
+  "title": "BlockedCandidate",
+  "type": "object"
+}

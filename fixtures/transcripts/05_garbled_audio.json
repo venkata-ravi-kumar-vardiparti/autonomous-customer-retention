@@ -1,0 +1,11 @@
+{
+  "call_id": "CALL_****1005",
+  "locale": "en-US",
+  "window_start_ts": "2026-09-19T14:20:00Z",
+  "guardrail_flags": ["low_confidence_transcription"],
+  "transcript_window": [
+    {"ts": "2026-09-19T14:20:02Z", "speaker": "customer", "text": "[inaudible] ...cancel my... [static] ...bill is way too [inaudible]..."},
+    {"ts": "2026-09-19T14:20:09Z", "speaker": "agent", "text": "I'm sorry, the line is breaking up — could you repeat that?"},
+    {"ts": "2026-09-19T14:20:18Z", "speaker": "customer", "text": "[garbled] ...want to [inaudible] my account..."}
+  ]
+}

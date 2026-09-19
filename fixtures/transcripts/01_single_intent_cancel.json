@@ -1,0 +1,11 @@
+{
+  "call_id": "CALL_****1001",
+  "locale": "en-US",
+  "window_start_ts": "2026-09-19T14:00:00Z",
+  "guardrail_flags": [],
+  "transcript_window": [
+    {"ts": "2026-09-19T14:00:02Z", "speaker": "customer", "text": "Hi, I'd like to cancel my service, please."},
+    {"ts": "2026-09-19T14:00:07Z", "speaker": "agent", "text": "I'm sorry to hear that. Can I ask what's prompting the cancellation today?"},
+    {"ts": "2026-09-19T14:00:15Z", "speaker": "customer", "text": "It's just too expensive for what I'm getting. I want to close the account."}
+  ]
+}
