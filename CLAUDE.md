@@ -44,7 +44,7 @@ src/churnguard/
   config.py                  process settings from env vars
   contracts/                 Pydantic contracts — source of truth, see below
   data/                      Governed Data Layer — see "Governed Data Layer" below
-  policy/                    deterministic eligibility rules (empty — Phase 5+)
+  policy/                    deterministic eligibility rules — see "Offer Policy engine" below
   telemetry/                 cost/latency/token emitters (empty)
   guardrails/                prompt-injection / safety guardrails (empty)
   tools/                     Agents SDK tool wrappers over data/ (empty)
@@ -230,25 +230,109 @@ caught it in CI. Also round monetary/derived floats
 digit-run regex will flag as a false positive, on top of just being an
 odd value to hand an agent.
 
-## Draft phase plan (proposed, not yet confirmed — check with the user before treating as fixed)
+## Offer Policy engine (`policy/`, built Phase 2)
+
+The compliance boundary: offer eligibility verdicts produced by code,
+versioned, reproducible, zero model involvement. Independent of `data/` —
+consumes `account_digest: dict[str, Any]` (from `PolicyEvaluationRequest`,
+frozen contract), never a repository, and does not import `churnguard.data`
+anywhere (checked by `test_policy_engine.py::test_engine_module_has_no_llm_or_data_imports`,
+which parses the module source with `ast` rather than trusting a grep).
+
+- **`packs/v2026.09.1.yaml`** — the versioned pack: `limits`
+  (`max_monthly_discount_tier1/2`, `max_discount_pct`,
+  `max_bundle_duration_months`), `authority_tiers` (name → int, e.g.
+  `regional_manager: 3`), `rules` (RET-014, RET-002, BIL-003, PLN-021,
+  FIN-009) and `prohibited_actions` (PRO-007).
+- **`loader.py`** — `load_pack_from_dict/_yaml_text/_path`, each validating
+  the pack's declared rule IDs against `KNOWN_RULE_IDS`/`KNOWN_PROHIBITED_IDS`
+  **in both directions** (pack declares an ID with no code, or code
+  implements an ID the pack never declares — both raise `PolicyPackError`
+  at load time). `compute_pack_hash()` is a SHA-256 of the canonical
+  (sorted-key) JSON of the whole pack dict, not of the YAML file's raw
+  bytes — so a mutation test can flip an in-memory dict and re-hash without
+  touching disk. `get_pack(version)` is `@cache`d: the only I/O in the
+  whole package, and it happens once per version, before evaluation.
+- **`digest.py`** — `parse_account_digest()` turns the loose
+  `account_digest` dict into a typed `AccountDigest` (`current_monthly`,
+  `active_promo_codes`, `financing_active`, `payment_current`). Every
+  required key must be present and correctly typed or it raises
+  `PolicyDigestError` — nothing is ever silently defaulted, including a
+  `current_monthly <= 0`.
+- **`engine.py`** — `evaluate(request, *, now=None)` is the public entry
+  point matching the phase brief's literal signature; it resolves the pack
+  via `loader.get_pack` and delegates to `evaluate_with_pack(request, pack,
+  *, now=None)`, the true pure core (no I/O, total function of its
+  inputs — see "why `now` is a parameter" below). `_combine_verdict()` is
+  the **one** place a `Verdict.verdict` value is decided, and it checks
+  `blocked` unconditionally and first — no other code path constructs a
+  verdict, so a blocked outcome can't structurally be promoted to `pass`.
+- **`rules/`** — each rule module exposes a function returning
+  `RuleOutcome | None` (`rules/__init__.py`). `None` means "doesn't apply
+  to this component." Two rule *kinds*:
+  - **Category rules** (RET-014, BIL-003, PLN-021, FIN-009, PRO-007): keyed
+    to a component-code prefix (`RET_`, `BIL_`, `PLN_`, `FIN_`, `PRC_` —
+    see "Offer component convention" below). Appear in `governing_rules`
+    whenever their category is present, pass or block.
+  - **The one universal rule** (RET-002, discount % of `current_monthly`):
+    applies to every candidate regardless of category, but only ever
+    returns an outcome — and so only ever appears in `governing_rules` —
+    when it's actually violated. A passing check contributes nothing.
+
+### Why `now` is a keyword parameter, not a contract field
+
+`PolicyVerdictSet.evaluated_at` needs a timestamp, but a function that
+reads the wall clock internally isn't pure and can't produce byte-identical
+output across repeated calls (acceptance criterion 1: 1000 iterations,
+identical input, identical output). `evaluate()`/`evaluate_with_pack()`
+both take `now: datetime | None = None`; real callers can omit it (falls
+back to `datetime.now(UTC)`), and every determinism/mutation test passes a
+fixed value explicitly. Same pattern as `data/provenance.py::make_evidence`'s
+`now` parameter in Phase 1 — deliberate precedent, not a coincidence.
+
+### Offer component convention (decided in Phase 2, no prior contract guidance)
+
+`CandidateOffer.type` (frozen, `contracts/offers.py`) is a coarse,
+whole-candidate enum (`bill_credit`, `plan_change`, `retention_bundle`,
+etc.) and can't express that one candidate bundles two different rule
+categories (e.g. the reference C1 is a retention credit *and* an autopay
+restoration in one `bill_credit` candidate). Category detection is
+therefore done per-`OfferComponent` via a **code prefix convention**, not
+`CandidateOffer.type`:
+
+| Prefix | Category | Rule |
+|---|---|---|
+| `RET_` | retention credit | RET-014 |
+| `BIL_` | autopay discount restoration | BIL-003 |
+| `PLN_` | plan migration (hotspot reduction) | PLN-021 |
+| `FIN_` | device-financing credit | FIN-009 |
+| `PRC_` | competitor price match | PRO-007 |
+
+**Any future phase that generates `CandidateOffer`s (offer generation,
+Supervisor) must use these prefixes on `OfferComponent.code`** for the
+policy engine to route them correctly — an unrecognized prefix simply
+passes through with no governing rules, silently, not an error. This is
+the one place a genuinely wrong guess would be expensive to unwind, and
+it's a decision made in-package (not asked of the user) because it doesn't
+touch a frozen contract.
+
+## Phase plan (actual sequence, as given phase-by-phase — supersedes any earlier guess)
+
+Each phase brief so far has been delivered independently and hasn't matched
+the Phase 0 draft guess below phase 1, so stop guessing ahead: treat only
+0-2 as fixed fact, and update this list from the actual brief each time a
+new phase arrives rather than trusting the remainder.
 
 0. **Done.** Scaffold + full contract set + fixtures + CI.
 1. **Done.** Governed Data Layer (`data/`) — see above.
-2. Conversation agent + `guardrails/` (prompt-injection resistance — see
-   fixtures 03/11).
-3. Customer 360 agent + `tools/` wrapping the data layer.
-4. Competitor agent + curated snapshot store (no live scraping).
-5. Offer Policy engine (`policy/`): deterministic rules, policy pack
-   versioning/hashing.
-6. Supervisor orchestration (`orchestration/`): fan-out, reconcile,
-   `bounded_pipeline` mode first.
-7. Confidence scoring, evidence citation, `telemetry/` emitters wired to
-   `Telemetry`.
-8. Approval workflow (`approval/`): `ApprovalDecision` persistence, edit
-   tracking.
-9. Execution boundary (`execution/`): `ExecutionRequest` validation against
-   a mocked downstream service (still out of scope to actually execute).
-10. FastAPI surface (`api/`) for the agent-facing UI.
+2. **Done.** Offer Policy engine (`policy/`) — see "Offer Policy engine"
+   below. Independent of `data/`: consumes `account_digest: dict`, never a
+   repository.
+3-11. Not yet specified. Original draft guess (Conversation agent,
+   Customer 360 agent, Competitor agent, Supervisor orchestration,
+   confidence/telemetry, approval workflow, execution boundary, FastAPI,
+   Streamlit UI) is unconfirmed and increasingly unlikely to match the
+   real order — don't plan around it.
 11. Streamlit UI (`ui/`) + end-to-end demo, `experiments/` for offline
     tuning.
 
@@ -273,7 +357,7 @@ each parses.
 make install     # uv sync --extra dev
 make test        # uv run pytest
 make lint        # uv run ruff check src tests scripts
-make typecheck   # uv run mypy --strict src/churnguard/contracts src/churnguard/data
+make typecheck   # uv run mypy --strict src/churnguard/contracts src/churnguard/data src/churnguard/policy
 make schemas     # regenerate schemas/*.json from contracts/
 ```
 
@@ -306,3 +390,19 @@ commands directly (see Makefile).
 - `ruff check` passes on `src`, `tests`, `scripts`.
 - Out of scope, as specified: no agents, no LLM calls, no policy rules, no
   orchestration.
+
+## Phase 2 acceptance status
+
+- `pytest` passes (118 tests total; 46 new in `tests/unit/test_policy_*.py`):
+  the exact reference scenario (C1-C4) reproduced byte-for-byte,
+  determinism over 1000 iterations, rule-ID coverage (self-contained,
+  order-independent — see `test_policy_rules.py`), mutating each of the
+  4 pack limits changes both `policy_pack_hash` and the full
+  `PolicyVerdictSet` output, and malformed `account_digest` variants are
+  all rejected with `PolicyDigestError`.
+- `mypy --strict` passes on `src/churnguard/contracts`, `src/churnguard/data`
+  **and** `src/churnguard/policy` (Makefile/CI updated).
+- `ruff check` passes on `src`, `tests`, `scripts`.
+- Confirmed independent of `data/`: zero `churnguard.data` imports anywhere
+  under `policy/` (AST-checked, not just grepped).
+- Out of scope, as specified: no agent wrapper, no data access, no LLM.

@@ -8,6 +8,7 @@ dependencies = [
     "openai-agents>=0.0.19",
     "pydantic>=2.8",
     "aiosqlite>=0.20",
+    "pyyaml>=6.0",
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "streamlit>=1.38",
@@ -18,6 +19,7 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "hypothesis>=6.100",
+    "types-PyYAML>=6.0",
     "mypy>=1.11",
     "ruff>=0.6",
 ]

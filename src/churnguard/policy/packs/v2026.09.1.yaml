@@ -1,0 +1,83 @@
+# ChurnGuard policy pack. Loaded and SHA-256 hashed by policy/loader.py.
+#
+# Rule matching convention: each rule/prohibited-action that applies to a
+# specific offer component category declares a `component_prefix` — a
+# candidate's OfferComponent.code must start with that prefix for the rule
+# to apply. RET-002 is the one exception: it is a universal, candidate-level
+# check (discount as a percentage of the account's current bill) and has no
+# component_prefix.
+#
+# Changing ANY value in this file changes policy_pack_hash (see
+# loader.compute_pack_hash) and, for the limits, is expected to change
+# verdicts too — that's what tests/unit/test_policy_mutation.py checks.
+
+policy_pack_version: "2026.09.1"
+
+limits:
+  max_monthly_discount_tier1: 25.00
+  max_monthly_discount_tier2: 50.00
+  max_discount_pct: 0.20
+  max_bundle_duration_months: 24
+
+authority_tiers:
+  frontline_agent: 0
+  senior_agent: 1
+  supervisor: 2
+  regional_manager: 3
+
+rules:
+  RET-014:
+    name: "Retention credit within tier authority"
+    description: >
+      A retention credit (component_prefix RET_) is allowed up to
+      max_monthly_discount_tier1 at tier 1, or up to
+      max_monthly_discount_tier2 at tier 2+. Exceeding the tier-2 ceiling
+      blocks the candidate. Cannot be stacked with any currently active
+      promotion on the account.
+    component_prefix: "RET_"
+
+  RET-002:
+    name: "Discount percentage ceiling"
+    description: >
+      A candidate's total monthly discount, as a percentage of the
+      account's current monthly bill, may not exceed max_discount_pct.
+      Applies to every candidate, regardless of category.
+
+  BIL-003:
+    name: "Auto-restore autopay discount on valid payment method"
+    description: >
+      An autopay-discount restoration (component_prefix BIL_) is allowed
+      only when the account's payment method is currently valid
+      (payment_current). No special agent tier is required.
+    component_prefix: "BIL_"
+
+  PLN-021:
+    name: "Plan migration requires hotspot-reduction disclosure"
+    description: >
+      A plan migration (component_prefix PLN_) that reduces mobile hotspot
+      allowance from 50GB to 15GB must always be presented with the
+      hotspot-reduction disclosure, read verbatim.
+    component_prefix: "PLN_"
+    disclosure:
+      code: "DISC_HOTSPOT_REDUCTION"
+      text: >
+        This plan change reduces your mobile hotspot allowance from 50GB
+        to 15GB per month.
+      must_be_read_verbatim: true
+
+  FIN-009:
+    name: "Financing credit requires tier 2"
+    description: >
+      A device-financing credit (component_prefix FIN_) requires tier-2
+      agent authority and an active financing plan on the account,
+      regardless of amount, up to max_monthly_discount_tier2.
+    component_prefix: "FIN_"
+
+prohibited_actions:
+  PRO-007:
+    name: "Competitor price match prohibited below regional_manager tier"
+    description: >
+      A competitor price match (component_prefix PRC_) may not be offered
+      by any agent below the regional_manager authority tier.
+    component_prefix: "PRC_"
+    min_tier: "regional_manager"
