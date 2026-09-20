@@ -815,6 +815,109 @@ recommendation.
   `PRC_COMPETITOR_PRICE_MATCH` candidate is generated and PRO-007 blocks it
   at tier 1. This is what `tests/e2e/test_blocked_offer_leak.py` uses.
 
+## Approval gate, execution boundary & API surface (`approval/gate.py`, `approval/store.py`, `execution/service.py`, `api/routes.py`, built Phase 8)
+
+The objective: make "agents cannot commit" **structurally** true, not a
+documented convention someone could accidentally violate. A
+`RecommendationSet` is not a transaction — only a human's `ApprovalDecision`
+plus the execution boundary's own independent checks can make one.
+
+### The import wall (the actual enforcement mechanism)
+
+`execution/service.py` imports **only** `churnguard.contracts` and
+`churnguard.data` (the latter just for `data.masking`'s pure, I/O-free
+masked-ref shape check) plus stdlib/`aiosqlite` — never
+`churnguard.agents`, `churnguard.orchestration`, `churnguard.offers`, and
+not even `churnguard.approval`. `tests/architecture/test_no_imports.py`
+walks the AST of every `.py` file in each package (never a grep, never an
+actual import) and fails the build both directions: execution/ importing
+one of those packages, or one of those packages (plus `tools/`) importing
+`churnguard.execution`. This is the load-bearing guarantee, not
+`api/routes.py` calling things in the right order — `api/routes.py` is
+the one module allowed to import everything, but nothing downstream of it
+trusts that it did its job correctly.
+
+`execution/service.py::_validate` therefore **duplicates** several checks
+`approval/gate.py` already made at approval time. That duplication is the
+point: `approval` and `recommendation` are explicit parameters to
+`execute()`, not values `execution/service.py` looks up itself (a real
+separate execution service receives a fully-resolved authorization payload
+from whatever called it; it does not reach into another service's private
+storage) — passing `None` for either is exactly how "missing or unknown
+approval_ref" and "recommendation_set could not be resolved" surface as
+rejections. `tests/architecture/test_no_imports.py`'s
+`test_a_rogue_tool_cannot_successfully_invoke_execution` proves the dynamic
+half of this: nothing at the Python level stops a tool body from importing
+`churnguard.execution` directly, but it still can't succeed, because no
+agent tool has ever been given a channel to a real `ApprovalDecision`
+(`RunContext` carries no such field).
+
+### The five mandatory rejections (`execution/service.py::_validate`)
+
+1. Missing or unknown `approval_ref` (caller passed `approval=None`).
+2. `approver_tier < approval_tier_required` for the matching `Recommendation`.
+3. An `ExecutionOperation.params["offer_id"]` differing from
+   `ApprovalDecision.selected_offer_id`.
+4. `RecommendationSet.commitment_status != "none"` — always `"none"` by
+   construction under normal use (`Literal["none"]`), but this contract
+   has no `validate_assignment=True`, so a corrupted/tampered instance
+   (plain attribute assignment) is still possible and still rejected;
+   `tests/unit/approval_fixtures.py::make_recommendation_set`'s
+   `corrupt_commitment_status` param is how the tests simulate this.
+5. Any `Recommendation.required_disclosures` code missing from
+   `ApprovalDecision.disclosures_read`.
+
+Plus two additional, non-required defense-in-depth guards: a referenced
+approval whose `decision != "approved"`, and a malformed `account_ref`.
+
+### `ExecutionOperation.params` vocabulary (decided this phase, per the Phase 0 flag)
+
+`ExecutionOperation` (`contracts/approval.py`) was explicitly flagged in
+Phase 0 as a minimal shape for a later phase to define the real vocabulary
+of. `ExecutionRequest` itself has no offer-id field, so Phase 8 defines the
+convention: every operation's `params` dict is expected to carry an
+`"offer_id"` key naming which recommendation it executes — this is what
+makes rejection path 3 above checkable at all. Not a contract change
+(`params: dict[str, Any]` already allowed this); a documented convention,
+same as `offers/generator.py`'s component-code-prefix convention.
+
+### Idempotency (`execution/service.py`'s own SQLite ledger)
+
+`execute()` owns its own SQLite file (`Settings.execution_db_path`, env
+`CHURNGUARD_EXECUTION_DB_PATH`) — same "own file, own schema" pattern as
+`telemetry/audit.py` and `approval/store.py`, and for the same reason
+(the Governed Data Layer's connections are read-only). Replaying an
+already-seen `idempotency_key` returns the **original** stored
+`ExecutionResult` unconditionally — before any validation runs — even if
+the replayed call's `request`/`approval`/`recommendation` arguments differ
+from the first call's (`tests/unit/test_idempotency.py`'s
+`test_replay_never_double_applies_even_with_a_different_second_request`
+exercises exactly this). "Never a double credit."
+
+### `approval/store.py` — immutable by omission
+
+No update or delete function exists in this module's public API at all —
+immutability is enforced by what isn't there, not by a database trigger.
+`persist_approval_decision` additionally refuses to overwrite an existing
+`approval_ref` row (defensive; a genuine collision would require a
+SHA-256 collision) and mints the `approval_ref` itself at persistence time
+— `ApprovalDecision` carries no such id, the same way `RecommendationSet`
+doesn't self-assign `recommendation_set_id` until `orchestration/bounded.py`
+mints one.
+
+### `api/routes.py` — the audit point, not the security boundary
+
+`POST /calls/{id}/recommend` runs the bounded pipeline (Phase 7) and
+caches the resulting `RecommendationSet` in a process-local in-memory dict
+keyed by `recommendation_set_id` — there is no dedicated recommendation-set
+store yet (out of scope; nothing in this phase's brief asked for one). A
+later phase needing cross-process/durable lookup should replace this, not
+build around it. `POST /approvals` runs `approval/gate.py` before
+persisting (a 422 with reasons if it fails) and `POST /execute` looks up
+the approval and recommendation set to hand to `execution/service.py`.
+**An audit row is written for every approval and execution decision,
+including every rejection and escalation** — never only for a happy path.
+
 ## Phase plan (actual sequence, as given phase-by-phase — supersedes any earlier guess)
 
 Each phase brief so far has been delivered independently and hasn't matched
@@ -846,10 +949,17 @@ new phase arrives rather than trusting the remainder.
    `offers/ranker.py`) — see "Supervisor orchestration & ranking" below.
    The milestone phase: first end-to-end RecommendationSet, reconciling all
    four specialist agents under a hard policy filter.
-8-11. Not yet specified. Original draft guess (confidence/telemetry,
-   approval workflow, execution boundary, FastAPI, Streamlit UI) is
-   unconfirmed and increasingly unlikely to match the real order — don't
-   plan around it.
+8. **Done.** Approval gate + persistence (`approval/gate.py`,
+   `approval/store.py`) and the execution boundary
+   (`execution/service.py`) + the FastAPI surface (`api/routes.py`) — see
+   "Approval gate, execution boundary & API surface" below. Structurally
+   enforces "agents cannot commit": execution/ shares no imports with
+   agents/, orchestration/ or offers/, checked by an AST-walking CI gate
+   (`tests/architecture/test_no_imports.py`).
+9-11. Not yet specified. Original draft guess (confidence/telemetry
+   already substantially covered by Phase 7's telemetry spine and
+   aggregate.py; Streamlit UI) is unconfirmed and increasingly unlikely to
+   match the real order — don't plan around it.
 11. Streamlit UI (`ui/`) + end-to-end demo, `experiments/` for offline
     tuning.
 
@@ -1128,3 +1238,45 @@ commands directly (see Makefile).
   reproduced in isolation during this phase's verification, unrelated to
   any Phase 7 change. Left as-is.
 - Out of scope, as specified: no approval UI, no execution, no A/B harness.
+
+## Phase 8 acceptance status
+
+- `pytest` passes (384 tests total; 32 new — `tests/unit/test_approval_gate.py`
+  (10 tests), `test_approval_store.py` (3, not in the brief's explicit
+  list but added for basic persistence/immutability coverage),
+  `test_execution_rejections.py` (10: the five required rejection paths,
+  one happy path, three additional defense-in-depth guards),
+  `test_idempotency.py` (4), `tests/architecture/test_no_imports.py`
+  (3: execution/ importing agents/orchestration/offers, the reverse for
+  agents/orchestration/offers/tools, and the rogue-tool runtime test)):
+  every one of the five mandatory rejection paths has its own passing
+  negative test against `execution.service.execute()` called directly
+  with plain contract objects; the idempotency replay tests confirm a
+  second call with the same `idempotency_key` returns the byte-identical
+  original result even when given deliberately different (and, alone,
+  invalid) second-call arguments; the IMPORT-GRAPH TEST walks the AST of
+  `execution/`, `agents/`, `orchestration/`, `offers/` and `tools/` and
+  fails on any forbidden cross-import in either direction; the rogue-tool
+  test defines a tool body that imports `churnguard.execution` directly
+  and calls it with `approval=None` (the honest worst case — no tool has
+  ever been given a real `ApprovalDecision`) and asserts the call is
+  rejected, never accepted.
+- `mypy --strict` passes on every package the Makefile now covers,
+  extended this phase to include `approval`, `execution` and `api`
+  (66 source files total).
+- `ruff check` passes on `src`, `tests`, `scripts`.
+- No contract changes this phase. `ExecutionOperation.params`'s vocabulary
+  (an `"offer_id"` key) was defined per the Phase 0 flag that this shape
+  was minimal and Phase 8/9's to fill in — see "Approval gate, execution
+  boundary & API surface" above; `params: dict[str, Any]` already allowed
+  this without a type change.
+- Two new `Settings` fields (`approval_db_path`, `execution_db_path`,
+  envs `CHURNGUARD_APPROVAL_DB_PATH` / `CHURNGUARD_EXECUTION_DB_PATH`) —
+  additive, following the exact precedent `audit_db_path`/`audit_log_path`
+  set in Phase 3.
+- Verified via a manual FastAPI `TestClient` smoke run (not a committed
+  test, since the brief's explicit test list didn't ask for one and
+  `POST /calls/{id}/recommend` needs a real or heavily-mocked LLM to
+  exercise meaningfully): approve → execute → replay (no-op) → reject an
+  unknown `approval_ref`, all behaving as designed.
+- Out of scope, as specified: no UI beyond the three API endpoints.

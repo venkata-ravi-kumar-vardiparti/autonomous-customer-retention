@@ -20,6 +20,8 @@ class Settings:
     default_deadline_ms: int
     audit_db_path: str
     audit_log_path: str
+    approval_db_path: str
+    execution_db_path: str
 
 
 def load_settings() -> Settings:
@@ -30,4 +32,8 @@ def load_settings() -> Settings:
         default_deadline_ms=int(os.environ.get("CHURNGUARD_DEADLINE_MS", "2000")),
         audit_db_path=os.environ.get("CHURNGUARD_AUDIT_DB_PATH", "churnguard_audit.db"),
         audit_log_path=os.environ.get("CHURNGUARD_AUDIT_LOG_PATH", "churnguard_audit.jsonl"),
+        approval_db_path=os.environ.get("CHURNGUARD_APPROVAL_DB_PATH", "churnguard_approvals.db"),
+        execution_db_path=os.environ.get(
+            "CHURNGUARD_EXECUTION_DB_PATH", "churnguard_execution.db"
+        ),
     )
