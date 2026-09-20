@@ -31,6 +31,7 @@ from churnguard.contracts.competitor import (
 from churnguard.contracts.envelope import AgentResult
 from churnguard.data.repositories import competitor_repo
 from churnguard.offers import normalizer
+from churnguard.orchestration import prefetch
 from churnguard.orchestration.context import RunContext
 from churnguard.tools.competitor_tools import COMPETITOR_TOOLS
 
@@ -100,13 +101,24 @@ async def run_competitor_agent(
     if result.data is None:
         return result
 
-    snapshots = await competitor_repo.get_snapshots(
-        query.geography, carriers=query.carriers, max_snapshot_age_days=query.max_snapshot_age_days
-    )
-    if not snapshots.data:
+    prefetched = await prefetch.get_prefetched(query.geography)
+    if prefetched is not None:
+        # Phase 10: a call-connect prefetch hit - filter the already-fetched
+        # superset by carrier ourselves instead of paying a second live
+        # round trip (see orchestration/prefetch.py's module docstring for
+        # why age filtering isn't reapplied here).
+        offers_for_query = [offer for offer in prefetched if offer.carrier in query.carriers]
+    else:
+        snapshots = await competitor_repo.get_snapshots(
+            query.geography,
+            carriers=query.carriers,
+            max_snapshot_age_days=query.max_snapshot_age_days,
+        )
+        offers_for_query = snapshots.data
+    if not offers_for_query:
         return result
 
-    primary = min(snapshots.data, key=lambda offer: offer.normalized_monthly_equivalent)
+    primary = min(offers_for_query, key=lambda offer: offer.normalized_monthly_equivalent)
     meta = await competitor_repo.get_snapshot_meta(primary.source_snapshot_id)
 
     per_line_price = round(primary.monthly_price / primary.line_count, 2)

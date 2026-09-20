@@ -1017,6 +1017,133 @@ this phase (established by `tests/e2e`'s `from tests.support...` imports).
 added here because the Phase 9 UI's live-mode trace panel needs it and it
 touches neither approval nor execution.
 
+## Latency SLA & fault tolerance (`orchestration/prefetch.py`, `data/cache.py`, `orchestration/deadlines.py`, built Phase 10)
+
+Objective: hit the latency SLA, and behave correctly when data is missing,
+stale, contradictory or unavailable. Fallback lives in the schema
+(`confidence_adjustments`, `fallbacks_applied`, `agent_context_notes`) —
+never in a bare `except` block that swallows the problem.
+
+### The six fault scenarios, and where each is actually handled
+
+1. **Stale competitor snapshot** — already `status="stale"` + a
+   `confidence_penalty` since Phase 6/7
+   (`agents/competitor.py`/`orchestration/aggregate.py::competitor_freshness_adjustment`);
+   Phase 10 adds `aggregate.competitor_staleness_note` to
+   `agent_context_notes` — the "indicative banner" data.
+2. **Missing usage data** — already `status="partial"` + penalized since
+   Phase 4/7 (`agents/customer.py::detect_missing_usage`,
+   `aggregate.customer_missing_evidence_adjustments`) — unchanged.
+3. **Contradictory billing rows** —
+   `aggregate.billing_contradiction_adjustment` /
+   `billing_contradiction_note`, new this phase: compares
+   `sum(delta_attribution amounts)` against the bill's actual `delta`
+   (tolerance $1.00); a mismatch is a confidence penalty *and* a `WARNING`
+   note naming **both** figures, never a silent pick-one-side. Exercised
+   against `data/seed/generate.py`'s own `build_contradictory_billing`
+   scenario (Phase 1 built the data specifically for a later phase to
+   detect this — Phase 10 is that later phase).
+4. **Repository unavailable** — every external call in
+   `orchestration/bounded.py` (the account bootstrap read, the Customer
+   360 agent, the Competitor agent) is now individually guarded via
+   `orchestration/deadlines.py`; a failure falls back rather than
+   propagates (see "Fault-tolerant fan-out" below).
+5. **Deadline breach** — the same `orchestration/deadlines.py` mechanism;
+   `asyncio.wait_for`'s standard cancellation actually stops the slow
+   coroutine, never leaves it running in the background.
+6. **Guardrail tripwire** — `agents/conversation.py` already lets the call
+   proceed with degraded `ConversationSignals` (Phase 5); Phase 10 adds an
+   `telemetry.audit.write_audit_record` call in `orchestration/bounded.py`
+   whenever `conversation_result.status == "insufficient_evidence"` — the
+   "logged" half.
+
+### Fault-tolerant fan-out (`orchestration/deadlines.py`)
+
+`agents/base.py::run_agent` already enforces `RunContext.deadline_ms`
+internally, converting an overrun into `DeadlineExceededError` — but that
+only handles *one* failure mode. `orchestration/deadlines.py::run_with_deadline`
+wraps a coroutine with its own `asyncio.wait_for` **and** a broad
+`except Exception`, returning a `DeadlineOutcome` that never raises: a
+timeout and a dropped repository connection collapse into the exact same
+handling code in `orchestration/bounded.py`. `gather_with_deadlines` runs
+several such wrapped calls concurrently and can never see a child
+exception to propagate, since every child already caught its own.
+
+`orchestration/bounded.py` uses this for the conversation call and the
+customer/competitor fan-out. On a customer_360 agent failure, it falls
+back to the account bootstrap read already fetched to seed the competitor
+query (Phase 7's parallelism trick doubles as Phase 10's redundancy); on a
+bootstrap failure too, a minimal placeholder `AccountContext` (a
+zero/empty account, `excluded_fields=["ALL - ..."]`) keeps the pipeline
+schema-valid. Because `policy/digest.py` deliberately requires
+`current_monthly > 0` and never defaults it (Phase 2), a placeholder
+account (`current_bill=0.0`) causes candidate generation and policy
+evaluation to be **skipped entirely** rather than fabricate a fake
+digest — the correct answer when there is truly no billing data is an
+explicitly empty `recommendations` list, not an invented one. Every
+degraded agent is recorded twice: once in `fallbacks_applied` (prose) and
+once via `aggregate.degraded_agent_adjustment` (a confidence penalty) —
+never only one or the other. A degraded/failed agent's result is never
+re-retried (`_maybe_reretry_customer`/`_maybe_reretry_competitor` only run
+when the original call actually completed) — retrying a definitely-broken
+connection just spends the deadline twice for no benefit.
+
+### `orchestration/prefetch.py` — kick off the competitor fetch at call connect
+
+Called as the very first line of `run_bounded_pipeline`, before geography
+is even used to build the competitor query, so the fetch overlaps with
+everything the pipeline does before the fan-out step needs it (the
+conversation call, the account bootstrap read). Keyed by geography alone
+(carrier isn't named yet), memoized in-process for 30s.
+`agents/competitor.py::run_competitor_agent` checks
+`prefetch.get_prefetched(geography)` before falling back to its own live
+`competitor_repo.get_snapshots` call; a prefetch hit is filtered by
+carrier in memory (age filtering isn't reapplied to a prefetch hit —
+`ResolvedCompetitorOffer` carries no `captured_at` to filter by without
+another lookup, which would defeat the point — every existing caller's
+`max_snapshot_age_days` is generous enough that this never changes
+behaviour in the seeded data).
+
+### `data/cache.py` — boot cache for plans, promotions, competitor snapshots
+
+Loaded via `sqlite3.Connection.backup()` (a byte-faithful copy into an
+in-memory connection, not a hand-rolled row copy) into plain dict rows.
+`competitor_repo.get_snapshots`/`get_snapshot_meta` check
+`data.cache.is_loaded()` first and skip the live query (and its
+`DB_LATENCY_MS` sleep) entirely on a hit — **measured**: a
+`get_snapshots` + `get_snapshot_meta` pair dropped from ~92ms to ~0.1ms
+with `DB_LATENCY_MS=40`. `catalog_repo.get_plan_profile` and
+`promo_repo.get_active_promotions` are deliberately **not** rewired to
+consume this cache: both already resolve an account-specific join
+(`accounts JOIN plans` / `account_edges JOIN promo_eligibility JOIN promotions`)
+in a single query, so splitting out only the reference-table half would
+add a second query for zero round-trip reduction — an honest, documented
+boundary, not an oversight. Their cache accessors exist (satisfying the
+brief's literal "catalog, promos... cached at boot") but nothing calls
+them yet.
+
+**Honest latency finding**: the isolated competitor-fetch win above is
+real and measured, but at the whole-pipeline level it doesn't move p95
+much, because `agents/customer.py`'s own ~9-query sequential-ish chain
+(via `get_account_summary`) was already the slower of the two concurrent
+`asyncio.gather` branches before this phase — competitor was never the
+critical path's bottleneck in this specific architecture. The phase
+brief's "~450ms" estimate is illustrative, not a number this test
+environment reproduces exactly. What acceptance actually requires (p95 <
+1500ms, cold start < 3s) is met with comfortable margin regardless —
+measured ~1000-1050ms end-to-end for the reference scenario with
+`DB_LATENCY_MS=40`, both with and without the Phase 10 caches warmed.
+
+### Test isolation for both caches
+
+`data/cache.py` and `orchestration/prefetch.py` are process-global,
+memoized state — every test that touches either
+(`tests/chaos/test_fault_injection.py`, `tests/e2e/test_latency_benchmark.py`)
+resets both before **and** after itself. Without this, a stale prefetch
+hit or a lingering loaded cache from one test could silently bypass
+another test's monkeypatched repository failure (FAULT SCENARIO 4's own
+test would otherwise risk a false pass).
+
 ## Phase plan (actual sequence, as given phase-by-phase — supersedes any earlier guess)
 
 Each phase brief so far has been delivered independently and hasn't matched
@@ -1062,9 +1189,14 @@ new phase arrives rather than trusting the remainder.
    brief's explicit instruction; live integration is a manual smoke
    script (README.md), not automated, since it needs a real
    `OPENAI_API_KEY`.
-10-11. Not yet specified. Original draft guess (`experiments/` for offline
-   tuning) is unconfirmed — don't plan around it.
-11. `experiments/` for offline tuning, if a later phase brief still wants it.
+10. **Done.** Latency SLA + fault tolerance
+   (`orchestration/prefetch.py`, `data/cache.py`, `orchestration/deadlines.py`)
+   — see "Latency SLA & fault tolerance" below. Six defined fault
+   scenarios, each producing a schema-valid, clearly-flagged output;
+   fallback lives in the schema (confidence_adjustments,
+   fallbacks_applied, agent_context_notes), never in a bare except block.
+11. Not yet specified beyond the original draft guess (`experiments/` for
+   offline tuning) — don't plan around it.
 
 ## Fixture transcripts (`fixtures/transcripts/`)
 
@@ -1436,3 +1568,50 @@ commands directly (see Makefile).
   Phase 9 regression (this phase touched no code in `agents/` or
   `data/`).
 - Out of scope, as specified: no auth, no multi-user, no styling system.
+
+## Phase 10 acceptance status
+
+- `pytest` passes (410 tests total; 8 new — `tests/chaos/test_fault_injection.py`
+  (6, one per fault scenario) and `tests/e2e/test_latency_benchmark.py`
+  (2)): every fault scenario asserted on the actual `RecommendationSet`
+  fields (`confidence_adjustments`, `agent_context_notes`,
+  `fallbacks_applied`), never on an internal implementation detail; the
+  ACCEPTANCE-3-named test kills `competitor_repo.get_snapshots` via
+  monkeypatch mid-run (`aiosqlite.OperationalError`, simulating a dropped
+  connection) and asserts a schema-valid, clearly-flagged partial result
+  with the customer-side recommendations still intact; the deadline-breach
+  test gives the competitor model a 1s artificial delay against a 100ms
+  pipeline deadline and asserts a partial result, never a hang; the
+  guardrail test runs the real fixture-03 prompt-injection transcript and
+  reads back the audit row via `telemetry.audit.read_audit_records`; the
+  contradictory-billing test uses `data/seed/generate.py`'s own
+  `build_contradictory_billing` scenario and asserts the warning names
+  both the attributed total and the actual delta. Both latency benchmarks
+  pass with comfortable margin (~1000-1050ms measured against a 1500ms/
+  3000ms budget) — see "Latency SLA & fault tolerance" above for the
+  honest finding on why the competitor-specific optimization doesn't move
+  whole-pipeline p95 as much as the brief's illustrative estimate.
+- `mypy --strict` passes on every package the Makefile already covered
+  (no Makefile change needed - `data/cache.py` and
+  `orchestration/{prefetch,deadlines}.py` land inside directories already
+  listed wholesale); 72 source files.
+- `ruff check` passes on `src`, `tests`, `scripts`, `ui`.
+- No contract changes this phase. `aggregate.aggregate_confidence` gained
+  two optional, keyword-only, default-`None` parameters (`account`,
+  `degraded_agents`) - backward compatible, and it was already only ever
+  called from `orchestration/bounded.py` (confirmed via grep before
+  changing the signature).
+- One design tension surfaced and resolved without a contract change:
+  `ExecutionOperation`/`RecommendationSet.trace` etc. weren't touched, but
+  the fault-tolerance work did require `orchestration/bounded.py` to
+  build a placeholder `AccountContext` for the worst-case "no repository
+  data at all" branch - a real, schema-valid, but obviously-empty account
+  (`excluded_fields=["ALL - ..."]`), not a new contract shape.
+- Confirmed via a direct AST-free code read (not a formal test, since it's
+  an architectural observation rather than a behaviour): `agents/competitor.py`
+  importing `orchestration/prefetch.py` and `orchestration/bounded.py`
+  importing `orchestration/prefetch.py`/`data/cache.py` introduces no
+  import cycle - `prefetch.py` depends only on `data.repositories.competitor_repo`,
+  never on `agents/` or `orchestration/bounded.py`.
+- Out of scope, as specified: no A/B harness, no new features beyond the
+  three named modules and the six fault scenarios' handling.

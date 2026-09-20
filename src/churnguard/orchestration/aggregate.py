@@ -48,6 +48,9 @@ MISSING_USAGE_CORROBORATION_PENALTY = 0.03
 GENERIC_MISSING_EVIDENCE_PENALTY = 0.10
 BLOCKED_CONVERSATION_PENALTY = 0.5
 MAX_REREQUEST_ATTEMPTS = 1
+BILLING_CONTRADICTION_TOLERANCE_USD = 1.00
+BILLING_CONTRADICTION_PENALTY = 0.05
+DEGRADED_AGENT_PENALTY = 0.20
 
 _USAGE_MISSING_PREFIX = "usage_by_line."
 
@@ -140,6 +143,71 @@ def conversation_blocked_adjustment(
     )
 
 
+def _billing_attributed_total(account: AccountContext) -> float:
+    return round(sum(cause.amount for cause in account.billing.delta_attribution), 2)
+
+
+def billing_contradiction_adjustment(account: AccountContext) -> ConfidenceAdjustment | None:
+    """FAULT SCENARIO 3: a legacy billing system can hand back
+    delta_attribution rows that don't sum to the bill's actual delta
+    (data/seed/generate.py's "contradictory_billing" scenario is built
+    exactly to exercise this). The Governed Data Layer surfaces the rows
+    as-is - reconciling them is not a repository's job (see CLAUDE.md's
+    Phase 1 notes) - so this is where the contradiction is finally
+    detected: a confidence penalty, never a silent pick-one-side."""
+    attributed_total = _billing_attributed_total(account)
+    if abs(attributed_total - account.billing.delta) <= BILLING_CONTRADICTION_TOLERANCE_USD:
+        return None
+    return ConfidenceAdjustment(
+        reason=(
+            f"billing delta_attribution amounts (${attributed_total:.2f}) do not reconcile "
+            f"with the actual bill delta (${account.billing.delta:.2f}) - the underlying "
+            "billing rows are contradictory"
+        ),
+        delta=-BILLING_CONTRADICTION_PENALTY,
+    )
+
+
+def billing_contradiction_note(account: AccountContext) -> str | None:
+    """The human-facing half of billing_contradiction_adjustment: a
+    warning the Supervisor surfaces rather than silently picking either
+    the attributed causes or the raw delta as "the" explanation."""
+    attributed_total = _billing_attributed_total(account)
+    if abs(attributed_total - account.billing.delta) <= BILLING_CONTRADICTION_TOLERANCE_USD:
+        return None
+    return (
+        f"WARNING: billing rows are contradictory - attributed causes sum to "
+        f"${attributed_total:.2f} but the bill actually changed by "
+        f"${account.billing.delta:.2f}. Do not present a single explanation as fact; "
+        "flag for billing team review before committing to either figure."
+    )
+
+
+def competitor_staleness_note(competitor: CompetitorComparison | None) -> str | None:
+    """FAULT SCENARIO 1's "indicative banner": a stale competitor snapshot
+    already earns its own confidence_adjustment (competitor_freshness_adjustment)
+    - this is the accompanying human-readable note marking any competitor-based
+    comparison as approximate, not exact."""
+    if competitor is None or competitor.freshness != "stale":
+        return None
+    return (
+        f"Competitor pricing snapshot is {competitor.snapshot.age_days} days old (stale) - "
+        "treat any competitor-based comparison as indicative only, not exact."
+    )
+
+
+def degraded_agent_adjustment(agent_name: str, reason: str) -> ConfidenceAdjustment:
+    """FAULT SCENARIOS 4/5: an agent that failed outright (a dead
+    repository connection, a deadline breach, or any other exception
+    orchestration/deadlines.py caught) still needs to be visible in
+    confidence_adjustments, not just in fallbacks_applied - clearly
+    flagged, per the phase brief, wherever a human is likely to look."""
+    return ConfidenceAdjustment(
+        reason=f"{agent_name} did not complete ({reason}) - proceeding without it",
+        delta=-DEGRADED_AGENT_PENALTY,
+    )
+
+
 @dataclass(frozen=True)
 class ConfidenceAggregate:
     base_confidence: float
@@ -153,7 +221,16 @@ def aggregate_confidence(
     conversation_result: AgentResult[ConversationSignals],
     competitor: CompetitorComparison | None,
     concerns: list[Concern],
+    account: AccountContext | None = None,
+    degraded_agents: list[tuple[str, str]] | None = None,
 ) -> ConfidenceAggregate:
+    """account/degraded_agents are optional and keyword-only, added in
+    Phase 10: `account` lets billing_contradiction_adjustment run inline
+    here (FAULT SCENARIO 3) instead of every caller remembering to append
+    it separately; `degraded_agents` is a list of (agent_name, reason)
+    pairs for any agent orchestration/deadlines.py caught a timeout or
+    exception from (FAULT SCENARIOS 4/5). Both default to "none" so this
+    stays a pure superset of the Phase 7 signature."""
     adjustments: list[ConfidenceAdjustment] = []
     adjustments.extend(customer_missing_evidence_adjustments(customer_result, concerns))
 
@@ -164,6 +241,14 @@ def aggregate_confidence(
     freshness_adjustment = competitor_freshness_adjustment(competitor)
     if freshness_adjustment is not None:
         adjustments.append(freshness_adjustment)
+
+    if account is not None:
+        contradiction_adjustment = billing_contradiction_adjustment(account)
+        if contradiction_adjustment is not None:
+            adjustments.append(contradiction_adjustment)
+
+    for agent_name, reason in degraded_agents or []:
+        adjustments.append(degraded_agent_adjustment(agent_name, reason))
 
     overall = round(
         min(1.0, max(0.0, BASE_CONFIDENCE + sum(a.delta for a in adjustments))), 4
@@ -195,15 +280,22 @@ def build_mandatory_actions(concerns: list[Concern]) -> list[str]:
 
 __all__ = [
     "BASE_CONFIDENCE",
+    "BILLING_CONTRADICTION_PENALTY",
+    "BILLING_CONTRADICTION_TOLERANCE_USD",
     "BLOCKED_CONVERSATION_PENALTY",
+    "DEGRADED_AGENT_PENALTY",
     "GENERIC_MISSING_EVIDENCE_PENALTY",
     "MAX_REREQUEST_ATTEMPTS",
     "MISSING_USAGE_CORROBORATION_PENALTY",
     "ConfidenceAggregate",
     "aggregate_confidence",
+    "billing_contradiction_adjustment",
+    "billing_contradiction_note",
     "build_mandatory_actions",
     "competitor_freshness_adjustment",
+    "competitor_staleness_note",
     "conversation_blocked_adjustment",
     "customer_missing_evidence_adjustments",
+    "degraded_agent_adjustment",
     "has_uncorroborated_gap",
 ]

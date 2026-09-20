@@ -2,7 +2,7 @@
 
 Plain code decides fan-out, filtering and ranking - never an LLM. Pipeline:
 
-    guardrail -> conversation -> asyncio.gather(customer, competitor)
+    prefetch -> guardrail -> conversation -> asyncio.gather(customer, competitor)
         -> generator -> policy.evaluate -> rank -> render -> assemble
 
 "guardrail -> conversation" is one step: run_conversation_agent already
@@ -32,18 +32,63 @@ other part of the payload (see tests/e2e/test_blocked_offer_leak.py).
 Bounded re-request (aggregate.MAX_REREQUEST_ATTEMPTS = 1 per agent) is a
 hard-coded loop count, never left to model judgement: customer_360 is
 re-run at most once if it has a genuine (uncorroborated) evidence gap;
-competitor is re-run at most once if it resolved no offers at all.
+competitor is re-run at most once if it resolved no offers at all. A
+degraded (failed/timed-out) agent is never re-retried - see
+"Phase 10: fault tolerance" below for why.
+
+Phase 10: fault tolerance
+==========================
+
+Every external call this pipeline makes (an LLM agent call, a repository
+read) can fail outright or run past its deadline. Fallback belongs in the
+schema, not in exception handlers: this module's job is to turn any such
+failure into one of the six FAULT SCENARIOS below, never an unhandled
+exception, and never a hang. orchestration/deadlines.py is the shared
+mechanism - see its own docstring for why a timeout and an arbitrary
+exception get the exact same handling here.
+
+1. Stale competitor snapshot -> agents/competitor.py already sets
+   status="stale" and a confidence_penalty; this module additionally adds
+   aggregate.competitor_staleness_note to agent_context_notes - the
+   "indicative banner" data.
+2. Missing usage data -> already status="partial" (agents/customer.py) and
+   penalized (aggregate.customer_missing_evidence_adjustments) since
+   Phase 4/7 - unchanged here.
+3. Contradictory billing rows -> aggregate.billing_contradiction_adjustment
+   / billing_contradiction_note: a confidence penalty plus a WARNING note,
+   never a silent pick-one-side.
+4. Repository unavailable -> the account bootstrap read, the Customer 360
+   agent, and the Competitor agent are each independently guarded; any one
+   failing falls back (bootstrap failure -> a minimal placeholder account;
+   Customer 360 agent failure -> the already-fetched bootstrap account;
+   Competitor agent failure -> no competitor comparison) rather than
+   raising, and is recorded in both fallbacks_applied and
+   confidence_adjustments (aggregate.degraded_agent_adjustment).
+5. Deadline breach -> orchestration/deadlines.run_with_deadline actually
+   cancels the slow coroutine (asyncio.wait_for's standard behaviour) and
+   returns a DeadlineOutcome instead of raising; handled identically to
+   scenario 4.
+6. Guardrail tripwire -> agents/conversation.py already lets the call
+   proceed with a degraded ConversationSignals (Phase 5); this module adds
+   an audit_log write when that happens - "logged", per the phase brief.
+
+When account data itself could not be resolved at all (bootstrap AND the
+Customer 360 agent both failed), there is nothing real to build a
+recommendation from - PolicyEvaluationRequest.account_digest requires
+current_monthly > 0 by design (policy/digest.py, Phase 2, deliberately
+never defaulted) - so this module skips candidate generation entirely
+rather than fabricate a policy_digest input, and returns an explicitly
+empty, still schema-valid recommendations list instead.
 """
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
 
 from agents import Model
 
-from churnguard.agents.base import run_agent
+from churnguard.agents.base import DeadlineExceededError, run_agent
 from churnguard.agents.competitor import run_competitor_agent
 from churnguard.agents.conversation import run_conversation_agent
 from churnguard.agents.customer import CUSTOMER_360_SPEC
@@ -51,8 +96,14 @@ from churnguard.agents.supervisor import render_recommendation_copy
 from churnguard.config import load_settings
 from churnguard.contracts.competitor import CompetitorComparison, CompetitorQuery
 from churnguard.contracts.conversation import ConversationInput, ConversationSignals
-from churnguard.contracts.customer import AccountContext, CustomerContextRequest
-from churnguard.contracts.envelope import AgentResult
+from churnguard.contracts.customer import (
+    AccountContext,
+    Billing,
+    CustomerContextRequest,
+    PaymentHistorySummary,
+    PlanProfile,
+)
+from churnguard.contracts.envelope import AgentResult, EvidenceRef, Telemetry
 from churnguard.contracts.offers import CandidateOffer
 from churnguard.contracts.policy import PolicyEvaluationRequest, Verdict
 from churnguard.contracts.recommendation import (
@@ -66,9 +117,10 @@ from churnguard.contracts.recommendation import (
 )
 from churnguard.data.repositories import customer_repo
 from churnguard.offers import generator, ranker
-from churnguard.orchestration import aggregate
+from churnguard.orchestration import aggregate, deadlines, prefetch
 from churnguard.orchestration.context import AgentRequest, RunContext
 from churnguard.policy import engine as policy_engine
+from churnguard.telemetry.audit import write_audit_record
 from churnguard.telemetry.tracer import new_span_id, new_trace_id
 from churnguard.tools.customer_tools import ALL_CUSTOMER_360_DOMAINS
 
@@ -109,6 +161,89 @@ _HOLD_CONDITION_BY_KIND = {
     ),
 }
 
+_NO_TELEMETRY = Telemetry(
+    model="none", latency_ms=0, tokens_in=0, tokens_out=0, cost_usd=0.0, cache_hit=False
+)
+
+
+def _outcome_reason(outcome: deadlines.DeadlineOutcome[object]) -> str:
+    if outcome.timed_out or isinstance(outcome.error, DeadlineExceededError):
+        return "deadline exceeded"
+    return str(outcome.error) if outcome.error is not None else "unknown failure"
+
+
+def _degraded_account_context(account_ref: str) -> AccountContext:
+    """FAULT SCENARIO 4, worst case: the account bootstrap read itself
+    failed. A schema-valid, obviously-empty AccountContext so the rest of
+    the pipeline can still assemble a (empty-recommendations) response
+    instead of crashing on a None."""
+    return AccountContext(
+        account_ref=account_ref,
+        tenure_months=0,
+        line_count=0,
+        billing=Billing(current_bill=0.0, prior_bill=0.0, delta=0.0, delta_attribution=[]),
+        payment_history=PaymentHistorySummary(
+            on_time_count=0, late_count=0, last_late_date=None, current_past_due=0.0
+        ),
+        device_financing=[],
+        plan_profile=PlanProfile(
+            plan_code="UNKNOWN",
+            plan_name="Unknown - account data unavailable",
+            contract_type="unknown",
+            contract_end_date=None,
+        ),
+        usage_by_line={},
+        active_promotions=[],
+        verification_results=[],
+        excluded_fields=["ALL - account data repository unavailable"],
+    )
+
+
+def _agent_result_from_bootstrap(
+    account: AccountContext, evidence: list[EvidenceRef], *, reason: str
+) -> AgentResult[AccountContext]:
+    """FAULT SCENARIO 4: the Customer 360 AGENT failed/timed out, but the
+    direct bootstrap read (already performed to seed the competitor query)
+    is either real data or, in the worst case, the degraded placeholder
+    above - either way, a real AgentResult the rest of the pipeline can
+    treat uniformly."""
+    return AgentResult(
+        status="partial",
+        confidence=0.6,
+        data=account,
+        evidence=evidence,
+        missing_evidence=[],
+        warnings=[
+            f"customer_360 agent unavailable ({reason}); using a direct Governed Data "
+            "Layer read instead"
+        ],
+        telemetry=_NO_TELEMETRY,
+    )
+
+
+def _degraded_competitor_result(*, reason: str) -> AgentResult[CompetitorComparison]:
+    return AgentResult(
+        status="failed",
+        confidence=0.0,
+        data=None,
+        evidence=[],
+        missing_evidence=["competitor_comparison"],
+        warnings=[f"competitor agent unavailable: {reason}"],
+        telemetry=_NO_TELEMETRY,
+    )
+
+
+def _degraded_conversation_result(*, reason: str) -> AgentResult[ConversationSignals]:
+    return AgentResult(
+        status="failed",
+        confidence=0.0,
+        data=None,
+        evidence=[],
+        missing_evidence=["conversation_signals"],
+        warnings=[f"conversation agent unavailable: {reason}"],
+        telemetry=_NO_TELEMETRY,
+    )
+
 
 def _new_run_context(
     request: AgentRequest,
@@ -148,9 +283,7 @@ def _carriers_from_signals(signals: ConversationSignals) -> list[str]:
     return claimed or list(DEFAULT_CARRIERS)
 
 
-def _build_context_notes(
-    signals: ConversationSignals, account: AccountContext
-) -> list[str]:
+def _build_context_notes(signals: ConversationSignals, account: AccountContext) -> list[str]:
     notes: list[str] = []
     for figure in signals.customer_stated_figures:
         if figure.field.lower() not in _BILL_FIGURE_FIELDS:
@@ -329,6 +462,11 @@ async def run_bounded_pipeline(
     supervisor_span_id = new_span_id()
     agent_calls: list[str] = []
     fallbacks_applied: list[str] = []
+    degraded_agents: list[tuple[str, str]] = []
+
+    # --- prefetch: kick off the competitor snapshot fetch at call connect,
+    # before the transcript has named a carrier - see orchestration/prefetch.py ---
+    prefetch.start_prefetch(geography)
 
     # --- guardrail -> conversation ---
     window_start_ts = (
@@ -350,10 +488,37 @@ async def run_bounded_pipeline(
         policy_pack_version=supervisor_input.policy_pack_version,
         deadline_ms=supervisor_input.deadline_ms,
     )
-    conversation_result = await run_conversation_agent(
-        conversation_input, conversation_context, model_override=conversation_model_override
+    conversation_outcome = await deadlines.run_with_deadline(
+        run_conversation_agent(
+            conversation_input, conversation_context, model_override=conversation_model_override
+        ),
+        deadline_ms=supervisor_input.deadline_ms,
     )
     agent_calls.append("conversation")
+    if conversation_outcome.completed:
+        assert conversation_outcome.value is not None
+        conversation_result = conversation_outcome.value
+    else:
+        reason = _outcome_reason(conversation_outcome)
+        degraded_agents.append(("conversation", reason))
+        fallbacks_applied.append(
+            f"conversation agent unavailable ({reason}); proceeding without transcript signals"
+        )
+        conversation_result = _degraded_conversation_result(reason=reason)
+
+    if conversation_result.status == "insufficient_evidence":
+        # FAULT SCENARIO 6: the call proceeds (never blocked outright), the
+        # offending span(s) were already quarantined by
+        # guardrails/injection.py - this is the "logged" half.
+        await write_audit_record(
+            trace_id=trace_id,
+            prompt="prompt-injection guardrail tripped; offending span(s) quarantined",
+            evidence_ids=[],
+            policy_pack_version=supervisor_input.policy_pack_version,
+            decision="conversation_guardrail_tripped",
+            approver_ref=supervisor_input.agent_ref,
+        )
+
     signals = conversation_result.data if conversation_result.data is not None else _EMPTY_SIGNALS
 
     # --- fast, direct Governed Data Layer bootstrap (no LLM) to seed the
@@ -365,15 +530,26 @@ async def run_bounded_pipeline(
         ],
         verification_tasks=signals.verification_tasks,
     )
-    bootstrap = await customer_repo.get_account_context(customer_request)
-    bootstrap_account = bootstrap.data
+    try:
+        bootstrap = await customer_repo.get_account_context(customer_request)
+        bootstrap_account = bootstrap.data
+        bootstrap_evidence = list(bootstrap.evidence)
+    except Exception as exc:  # noqa: BLE001 - FAULT SCENARIO 4, see module docstring
+        reason = str(exc)
+        degraded_agents.append(("account_bootstrap", reason))
+        fallbacks_applied.append(
+            f"account data repository unavailable ({reason}); proceeding with a minimal "
+            "placeholder account"
+        )
+        bootstrap_account = _degraded_account_context(supervisor_input.account_ref)
+        bootstrap_evidence = []
 
     competitor_query = CompetitorQuery(
         geography=geography,
         carriers=_carriers_from_signals(signals),
         line_count=bootstrap_account.line_count,
         current_plan_profile=bootstrap_account.plan_profile.plan_code,
-        current_monthly=bootstrap_account.billing.current_bill,
+        current_monthly=max(bootstrap_account.billing.current_bill, 0.01),
         customer_claim=signals.competitor_claims[0] if signals.competitor_claims else None,
         switching_context=DEFAULT_SWITCHING_CONTEXT,
         max_snapshot_age_days=DEFAULT_MAX_SNAPSHOT_AGE_DAYS,
@@ -398,65 +574,115 @@ async def run_bounded_pipeline(
         deadline_ms=supervisor_input.deadline_ms,
     )
 
-    # --- asyncio.gather(customer, competitor): the real fan-out ---
-    customer_result, competitor_result = await asyncio.gather(
-        run_agent(
-            CUSTOMER_360_SPEC,
-            CUSTOMER_INPUT_TEXT,
-            customer_context,
-            model_override=customer_model_override,
-        ),
-        run_competitor_agent(
-            competitor_query, competitor_context, model_override=competitor_model_override
-        ),
+    # --- asyncio.gather(customer, competitor): the real fan-out, now with
+    # a per-agent deadline + exception guard (orchestration/deadlines.py) ---
+    outcomes = await deadlines.gather_with_deadlines(
+        {
+            "customer_360": (
+                run_agent(
+                    CUSTOMER_360_SPEC,
+                    CUSTOMER_INPUT_TEXT,
+                    customer_context,
+                    model_override=customer_model_override,
+                ),
+                supervisor_input.deadline_ms,
+            ),
+            "competitor": (
+                run_competitor_agent(
+                    competitor_query, competitor_context, model_override=competitor_model_override
+                ),
+                supervisor_input.deadline_ms,
+            ),
+        }
     )
     agent_calls.extend(["customer_360", "competitor"])
 
-    customer_result = await _maybe_reretry_customer(
-        customer_result,
-        signals=signals,
-        customer_request=customer_request,
-        trace_id=trace_id,
-        policy_pack_version=supervisor_input.policy_pack_version,
-        deadline_ms=supervisor_input.deadline_ms,
-        model_override=customer_model_override,
-        fallbacks_applied=fallbacks_applied,
-    )
-    competitor_result = await _maybe_reretry_competitor(
-        competitor_result,
-        competitor_query=competitor_query,
-        trace_id=trace_id,
-        policy_pack_version=supervisor_input.policy_pack_version,
-        deadline_ms=supervisor_input.deadline_ms,
-        model_override=competitor_model_override,
-        fallbacks_applied=fallbacks_applied,
-    )
+    customer_outcome = outcomes["customer_360"]
+    if customer_outcome.completed:
+        assert customer_outcome.value is not None
+        customer_result: AgentResult[AccountContext] = await _maybe_reretry_customer(
+            customer_outcome.value,
+            signals=signals,
+            customer_request=customer_request,
+            trace_id=trace_id,
+            policy_pack_version=supervisor_input.policy_pack_version,
+            deadline_ms=supervisor_input.deadline_ms,
+            model_override=customer_model_override,
+            fallbacks_applied=fallbacks_applied,
+        )
+    else:
+        reason = _outcome_reason(customer_outcome)
+        degraded_agents.append(("customer_360", reason))
+        fallbacks_applied.append(
+            f"customer_360 agent unavailable ({reason}); using the direct Governed Data "
+            "Layer read instead"
+        )
+        customer_result = _agent_result_from_bootstrap(
+            bootstrap_account, bootstrap_evidence, reason=reason
+        )
+
+    competitor_outcome = outcomes["competitor"]
+    if competitor_outcome.completed:
+        assert competitor_outcome.value is not None
+        competitor_result: AgentResult[CompetitorComparison] = await _maybe_reretry_competitor(
+            competitor_outcome.value,
+            competitor_query=competitor_query,
+            trace_id=trace_id,
+            policy_pack_version=supervisor_input.policy_pack_version,
+            deadline_ms=supervisor_input.deadline_ms,
+            model_override=competitor_model_override,
+            fallbacks_applied=fallbacks_applied,
+        )
+    else:
+        reason = _outcome_reason(competitor_outcome)
+        degraded_agents.append(("competitor", reason))
+        fallbacks_applied.append(
+            f"competitor agent unavailable ({reason}); proceeding without a competitor comparison"
+        )
+        competitor_result = _degraded_competitor_result(reason=reason)
 
     account = customer_result.data
-    assert account is not None, "customer_360 never returns None data on a normal run"
+    assert account is not None, (
+        "customer_result always carries data by construction: the real agent result, the "
+        "bootstrap fallback, or (worst case) the degraded placeholder"
+    )
     competitor = competitor_result.data
 
     # --- generator -> policy.evaluate (hard filter) -> rank ---
-    candidates: list[CandidateOffer] = generator.generate_candidates(account, signals, competitor)
-    digest = generator.account_digest_from_context(account)
-    policy_request = PolicyEvaluationRequest(
-        policy_pack_version=supervisor_input.policy_pack_version,
-        jurisdiction=jurisdiction,
-        channel=channel,
-        agent_authority_tier=supervisor_input.agent_authority_tier,
-        account_digest=digest,
-        candidate_offers=candidates,
-    )
-    verdict_set = policy_engine.evaluate(policy_request)
-    agent_calls.append("policy_engine")
+    # account.billing.current_bill <= 0 only for the degraded placeholder
+    # above (every real seeded account has a positive bill) - policy/digest.py
+    # deliberately requires current_monthly > 0 and never defaults it, so
+    # this pipeline skips generation entirely rather than fabricate one.
+    verdict_set = None
+    ranked: list[ranker.RankedCandidate] = []
+    if account.billing.current_bill > 0:
+        candidates: list[CandidateOffer] = generator.generate_candidates(
+            account, signals, competitor
+        )
+        digest = generator.account_digest_from_context(account)
+        policy_request = PolicyEvaluationRequest(
+            policy_pack_version=supervisor_input.policy_pack_version,
+            jurisdiction=jurisdiction,
+            channel=channel,
+            agent_authority_tier=supervisor_input.agent_authority_tier,
+            account_digest=digest,
+            candidate_offers=candidates,
+        )
+        verdict_set = policy_engine.evaluate(policy_request)
+        agent_calls.append("policy_engine")
 
-    verdicts_by_id = {v.candidate_id: v for v in verdict_set.verdicts}
-    eligible_candidates = [
-        c for c in candidates if verdicts_by_id[c.candidate_id].verdict != "blocked"
-    ]
-    ranked = ranker.rank_candidates(
-        eligible_candidates, current_monthly=account.billing.current_bill
-    )
+        verdicts_by_id = {v.candidate_id: v for v in verdict_set.verdicts}
+        eligible_candidates = [
+            c for c in candidates if verdicts_by_id[c.candidate_id].verdict != "blocked"
+        ]
+        ranked = ranker.rank_candidates(
+            eligible_candidates, current_monthly=account.billing.current_bill
+        )
+    else:
+        verdicts_by_id = {}
+        fallbacks_applied.append(
+            "account billing data unavailable; no candidates could be generated"
+        )
 
     # --- render: LARGE-model prose around already-computed facts only ---
     rendered_by_offer_id, render_failed = await render_recommendation_copy(
@@ -488,15 +714,23 @@ async def run_bounded_pipeline(
         for index, ranked_candidate in enumerate(ranked, start=1)
     ]
 
-    blocked_candidates = _build_blocked_candidates(verdict_set.verdicts)
+    blocked_candidates = _build_blocked_candidates(verdict_set.verdicts) if verdict_set else []
     confidence_aggregate = aggregate.aggregate_confidence(
         customer_result=customer_result,
         conversation_result=conversation_result,
         competitor=competitor,
         concerns=signals.unresolved_concerns,
+        account=account,
+        degraded_agents=degraded_agents,
     )
     mandatory_actions = aggregate.build_mandatory_actions(signals.unresolved_concerns)
     agent_context_notes = _build_context_notes(signals, account)
+    contradiction_note = aggregate.billing_contradiction_note(account)
+    if contradiction_note is not None:
+        agent_context_notes.append(contradiction_note)
+    staleness_note = aggregate.competitor_staleness_note(competitor)
+    if staleness_note is not None:
+        agent_context_notes.append(staleness_note)
     approval = _build_approval(recommendations)
 
     return RecommendationSet(
