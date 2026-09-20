@@ -691,6 +691,130 @@ delta), `generate_candidates()` reproduces Phase 2's C1–C4 fixtures
 `AccountContext` (`financing_active` = non-empty `device_financing`,
 `payment_current` = zero `current_past_due`).
 
+## Supervisor orchestration & ranking (`agents/supervisor.py`, `orchestration/bounded.py`, `orchestration/aggregate.py`, `offers/ranker.py`, built Phase 7)
+
+The milestone phase: reconciles the Conversation, Customer 360 and
+Competitor agents into one ranked, evidence-cited, policy-validated
+`RecommendationSet` in under 2 seconds. `SupervisorInput.orchestration_mode`
+(frozen contract field) has two real implementations:
+
+- **`bounded_pipeline`** (`orchestration/bounded.py`) — plain code decides
+  fan-out, the hard policy filter and the ranking; no LLM anywhere in that
+  decision path. Pipeline: guardrail → conversation → `asyncio.gather`
+  (customer, competitor) → generator → `policy.evaluate` → rank → render →
+  assemble. This is the only mode `tests/e2e/` exercises.
+- **`open_harness`** (`agents/supervisor.py::build_supervisor_tools` /
+  `SUPERVISOR_SPEC`) — a real `Agent` on `gpt-4.1`, the one LARGE-tier
+  model in ChurnGuard (every specialist stays on `gpt-4.1-mini`), whose
+  tools ARE the three specialist agents wired in via `Agent.as_tool(...)` —
+  agents-as-tools, never handoffs, so the Supervisor can reconcile several
+  partial views itself instead of losing its own turn to one sub-agent.
+  Exploratory, not exercised by `tests/e2e/`; a known, documented
+  limitation is called out in the module docstring (`RunContext.request` is
+  one field per run, so a Supervisor actually driving this mode end-to-end
+  would need a per-tool-call context scheme beyond what Phase 4–6 built).
+
+### Real fan-out, not a false one (Phase 6 assumption superseded)
+
+Phase 6 assumed the Competitor agent's `current_monthly` /
+`known_device_financing_payoff` would already be available because
+"the Supervisor... will already have run Customer 360" first — sequential,
+not concurrent. Phase 7's brief explicitly requires
+`asyncio.gather(customer, competitor)`, which supersedes that assumption:
+`orchestration/bounded.py` does one fast, direct Governed Data Layer read
+(`customer_repo.get_account_context`, no LLM) to seed the `CompetitorQuery`
+before dispatching the Customer 360 **agent** and the Competitor agent
+concurrently. This means two account-context reads happen per call (one
+direct, one via the Customer 360 agent's own tools) — a deliberate,
+documented trade-off for genuine parallelism, verified by the FAN-OUT TEST
+(`tests/e2e/test_latency_budget.py`), which injects artificial model
+latency and asserts the two agents' spans overlap in wall-clock time.
+
+### Confidence aggregation (`orchestration/aggregate.py`)
+
+`BASE_CONFIDENCE = 1.0` plus an itemised list of `ConfidenceAdjustment`
+reasons — never a single opaque number:
+
+- Missing Customer 360 evidence that corroborates a customer-flagged
+  concern (the exact line the customer says is failing has no usage
+  telemetry on file) gets a small named penalty
+  (`MISSING_USAGE_CORROBORATION_PENALTY = 0.03`), never the larger generic
+  one — CLAUDE.md's Phase 7 brief calls this out explicitly ("corroborating
+  evidence, not a dead end").
+- Any other missing evidence gets `GENERIC_MISSING_EVIDENCE_PENALTY = 0.10`.
+- Stale/aging competitor pricing surfaces `CompetitorComparison.confidence_penalty`
+  as its own named reason.
+- A conversation run blocked by the prompt-injection guardrail
+  (`status="insufficient_evidence"`) gets `BLOCKED_CONVERSATION_PENALTY = 0.5`.
+
+`overall_confidence = clamp(BASE_CONFIDENCE + sum(delta for adjustments), 0, 1)`
+by construction, so `base_confidence + sum(adjustments) == overall_confidence`
+exactly — verified by `tests/e2e/test_bounded_pipeline.py`. Bounded
+re-request (`MAX_REREQUEST_ATTEMPTS = 1` per agent) is a hard-coded loop
+count in `orchestration/bounded.py`, never left to model judgement:
+`aggregate.has_uncorroborated_gap` decides whether a gap is worth the one
+extra attempt (a corroborated gap never triggers one).
+
+`unresolved_concerns` with `customer_flagged_separate=true` become
+`mandatory_actions` via `aggregate.build_mandatory_actions` — a
+network/service keyword match becomes a structured
+`"open_network_ticket:<line_ref>:<location>"` action; anything else becomes
+a generic `"escalate_concern:<issue>"`. Never folded into a priced offer.
+
+### Ranking (`offers/ranker.py`)
+
+Candidates are classified into a `CandidateKind` from their component code
+prefixes (`RET_`/`BIL_` → `credit_reinstatement`, `PLN_` → `plan_migration`,
+`FIN_` → `retention_bundle`, `PRC_` → `competitor_price_match`), then
+scored `retention_likelihood(kind) × margin`, where margin is the account's
+**real remaining monthly bill** after the credit
+(`current_monthly + total_monthly_impact`), not a normalized percentage.
+Confidence per recommendation is a *separate* table
+(`CONFIDENCE_BY_KIND`), reflecting data-groundedness rather than business
+priority — a retention bundle's `FIN_` component is a real, verified
+device-financing balance, so it scores *higher* on confidence than a plan
+migration's flat template amount, even though it ranks lower on retention
+likelihood. For the ACCT_****4471 worked example (a churn signal, a
+reversible billing cause, and a stale-but-not-cheap-enough RivalCo
+snapshot), this produces C1 (credit reinstatement, -28.00) ranked above C2
+(plan migration, -38.44) despite C2's bigger discount — see
+`offers/ranker.py`'s module docstring for the worked score derivation.
+
+### Render step: the one LLM call in the bounded pipeline
+
+`agents/supervisor.py::render_recommendation_copy` is the LARGE model's
+only role in `bounded_pipeline` mode: given already-computed, already-
+policy-cleared facts (monthly deltas, new monthly bills, disclosure codes,
+the reconciliation between what the customer believes their bill is and
+what it actually is), it writes `title`/`rationale`/`talk_track` prose —
+the same "compute deterministically, LLM renders text around it" pattern
+as the Offer Policy pack's disclosure text and the Competitor agent's
+narrative framing. It can never change a rank, a price, or a verdict. A
+render failure or timeout is caught and never propagates — `bounded.py`
+falls back to templated copy per candidate and records this in
+`fallbacks_applied`, so a text-rendering hiccup can never block a
+recommendation.
+
+### Reconciliation scenario used by `tests/e2e/`
+
+`tests/e2e/support.py` builds two named scenarios against real seeded data
+(no fabricated `CompetitorComparison` payloads):
+
+- **Reference scenario** (ACCT_****4471): a bill-increase dispute ($50
+  believed vs. $33.23 actual), a network complaint on line 3 — the
+  account's own null-usage line, deliberately corroborating — in Frisco,
+  TX, and a RivalCo price claim. `carriers=["RivalCo"]` deliberately
+  resolves to the seeded, deliberately-**stale** RivalCo snapshot (a real
+  tie-break in the seeded data — see `support.py`'s module docstring for
+  the exact mechanism), which normalizes *above* the account's bill, so no
+  competitor-price-match candidate is generated here — this scenario
+  exercises ranking, confidence adjustments and stability, not the policy
+  hard filter.
+- **MetroWave scenario**: a churn-signal-only call naming MetroWave, whose
+  cheapest normalized offer genuinely undercuts the bill — a real
+  `PRC_COMPETITOR_PRICE_MATCH` candidate is generated and PRO-007 blocks it
+  at tier 1. This is what `tests/e2e/test_blocked_offer_leak.py` uses.
+
 ## Phase plan (actual sequence, as given phase-by-phase — supersedes any earlier guess)
 
 Each phase brief so far has been delivered independently and hasn't matched
@@ -717,10 +841,15 @@ new phase arrives rather than trusting the remainder.
    normalization/switching-costs/breakeven (`offers/normalizer.py`) +
    candidate offer generation (`offers/generator.py`) — see "Competitor
    agent & offer generation" below.
-7-11. Not yet specified. Original draft guess (Supervisor orchestration,
-   confidence/telemetry, approval workflow, execution boundary, FastAPI,
-   Streamlit UI) is unconfirmed and increasingly unlikely to match the real
-   order — don't plan around it.
+7. **Done.** Supervisor orchestration (`agents/supervisor.py`,
+   `orchestration/bounded.py`, `orchestration/aggregate.py`,
+   `offers/ranker.py`) — see "Supervisor orchestration & ranking" below.
+   The milestone phase: first end-to-end RecommendationSet, reconciling all
+   four specialist agents under a hard policy filter.
+8-11. Not yet specified. Original draft guess (confidence/telemetry,
+   approval workflow, execution boundary, FastAPI, Streamlit UI) is
+   unconfirmed and increasingly unlikely to match the real order — don't
+   plan around it.
 11. Streamlit UI (`ui/`) + end-to-end demo, `experiments/` for offline
     tuning.
 
@@ -950,3 +1079,52 @@ commands directly (see Makefile).
   `schemas/churnguard.contracts.competitor.CompetitorQuery.json` changed —
   verified via `git diff --stat schemas/` before committing.
 - Out of scope, as specified: no Supervisor, no ranking, no approval.
+
+## Phase 7 acceptance status
+
+- `pytest` passes (352 tests total; 23 new — `tests/e2e/test_bounded_pipeline.py`,
+  `test_latency_budget.py`, `test_blocked_offer_leak.py`, plus shared
+  scenario builders in `tests/e2e/support.py`): all 12 fixture transcripts
+  produce schema-valid `RecommendationSet`s against the real seeded DB
+  (blocked/prompt-injection fixtures 03/11 degrade to the empty-signals
+  fallback rather than failing); the ACCT_****4471 reference scenario ranks
+  C1 above C2 above C3 (retention likelihood × margin, not discount size —
+  C2's -38.44 discount is bigger than C1's -28.00 but still ranks lower);
+  the reconciliation checks (mandatory action for the Frisco/line-3
+  concern, the $50-believed-vs-$33.23-actual note, corroboration vs. a
+  bounded re-request) all hold; `overall_confidence` is asserted equal to
+  `BASE_CONFIDENCE + sum(adjustment deltas)` exactly; the top-ranked
+  `offer_id` is asserted identical across 5 repeated runs; the LEAK TEST
+  serializes the `RecommendationSet` with `blocked_candidates` excluded and
+  asserts the blocked id and its `PRC_COMPETITOR_PRICE_MATCH` component
+  never appear in the rest of the payload, for a real (not fabricated)
+  MetroWave-scenario blocked candidate; the FAN-OUT TEST injects artificial
+  model latency into the customer and competitor model doubles and asserts
+  their `AgentSpan`s overlap in wall-clock time via `export_trace`; p95
+  latency across 10 runs (with `DB_LATENCY_MS=40`) is asserted under 2000ms
+  (measured comfortably under 1s).
+- `mypy --strict` passes on every package the Makefile already covered
+  (`contracts`, `data`, `policy`, `telemetry`, `orchestration`, `agents`,
+  `tools`, `guardrails`, `offers`) — no Makefile change needed, since
+  Phase 6 already listed `orchestration`/`agents`/`offers` in full.
+- `ruff check` passes on `src`, `tests`, `scripts`.
+- No contract changes this phase — `BlockedCandidate`'s existing minimal
+  shape (`candidate_id`, `reason`, `governing_rules`, no priced components)
+  turned out to already be exactly what the LEAK TEST needed; the reference
+  brief's "visible_to_agent: false" language describes that existing
+  shape's effect, not a new field.
+- Confirmed independent design decisions made in-package (not asked of the
+  user, since none touch a frozen contract) — see "Supervisor orchestration
+  & ranking" above for the full reasoning on each: the real-fan-out
+  bootstrap read superseding Phase 6's sequential assumption; the
+  confidence-aggregation formula and its constants; the
+  retention-likelihood/confidence-by-kind tables in `offers/ranker.py`; the
+  mandatory-action keyword classifier; and the render step's fallback
+  contract (a rendering failure degrades to templated copy, logged in
+  `fallbacks_applied`, never propagated).
+- Known pre-existing flake, not introduced by this phase (same one flagged
+  in Phase 4's notes): `tests/unit/test_db_access.py::test_db_latency_ms_is_injected_per_query`
+  occasionally fails under Windows event-loop timer-resolution noise;
+  reproduced in isolation during this phase's verification, unrelated to
+  any Phase 7 change. Left as-is.
+- Out of scope, as specified: no approval UI, no execution, no A/B harness.

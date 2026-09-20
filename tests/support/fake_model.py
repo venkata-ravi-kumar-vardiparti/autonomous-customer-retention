@@ -17,6 +17,7 @@ live model.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable
 from typing import Any
@@ -90,12 +91,26 @@ class ScriptedModel(_UnusedStreamMixin, Model):
 
 
 class ToolCallingEchoModel(_UnusedStreamMixin, Model):
-    """Calls every tool once, then echoes their outputs into `assemble_output`."""
+    """Calls every tool once, then echoes their outputs into `assemble_output`.
 
-    def __init__(self, tools: list[Tool], assemble_output: Callable[[dict[str, Any]], str]) -> None:
+    delay_seconds (Phase 7): an optional artificial `asyncio.sleep` on every
+    call, so tests/e2e's FAN-OUT TEST can prove two agent calls dispatched
+    via asyncio.gather genuinely overlap in wall-clock time - an instant
+    fake response can complete so fast that even truly concurrent coroutines
+    never visibly overlap. Defaults to 0.0 (no behavior change for existing
+    callers).
+    """
+
+    def __init__(
+        self,
+        tools: list[Tool],
+        assemble_output: Callable[[dict[str, Any]], str],
+        *,
+        delay_seconds: float = 0.0,
+    ) -> None:
         self._tool_names = [tool.name for tool in tools]
         self._assemble_output = assemble_output
-        self._emitted_calls = False
+        self._delay_seconds = delay_seconds
 
     async def get_response(
         self,
@@ -104,8 +119,16 @@ class ToolCallingEchoModel(_UnusedStreamMixin, Model):
         *args: object,
         **kwargs: object,
     ) -> ModelResponse:
-        if not self._emitted_calls:
-            self._emitted_calls = True
+        if self._delay_seconds > 0.0:
+            await asyncio.sleep(self._delay_seconds)
+
+        # Stateless on `input` (not an instance flag) so one instance can be
+        # reused safely across independent Runner.run() calls - e.g. a
+        # bounded-pipeline re-request retry (orchestration/bounded.py) that
+        # passes the same model_override in twice, exactly like a real,
+        # stateless LLM would tolerate.
+        outputs_by_call_id = _function_call_outputs_by_call_id(input)
+        if not outputs_by_call_id:
             calls = [
                 ResponseFunctionToolCall(
                     arguments="{}",
@@ -118,7 +141,6 @@ class ToolCallingEchoModel(_UnusedStreamMixin, Model):
             ]
             return ModelResponse(output=calls, usage=_usage(), response_id="fake_tool_calls")
 
-        outputs_by_call_id = _function_call_outputs_by_call_id(input)
         outputs_by_tool_name = {
             name: outputs_by_call_id.get(f"call_{index}")
             for index, name in enumerate(self._tool_names)
@@ -129,4 +151,22 @@ class ToolCallingEchoModel(_UnusedStreamMixin, Model):
         )
 
 
-__all__ = ["ScriptedModel", "ToolCallingEchoModel"]
+class StaticJSONModel(_UnusedStreamMixin, Model):
+    """Single-turn fake: always returns the same final JSON message, no tool
+    calls. Used for tool-less agents (e.g. agents/supervisor.py's render
+    step) where ToolCallingEchoModel's tool-calling turn isn't needed.
+    """
+
+    def __init__(self, json_text: str, *, delay_seconds: float = 0.0) -> None:
+        self._json_text = json_text
+        self._delay_seconds = delay_seconds
+
+    async def get_response(self, *args: object, **kwargs: object) -> ModelResponse:
+        if self._delay_seconds > 0.0:
+            await asyncio.sleep(self._delay_seconds)
+        return ModelResponse(
+            output=[_final_message(self._json_text)], usage=_usage(), response_id="fake_static"
+        )
+
+
+__all__ = ["ScriptedModel", "StaticJSONModel", "ToolCallingEchoModel"]
