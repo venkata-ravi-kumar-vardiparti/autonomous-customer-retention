@@ -19,12 +19,16 @@ class ModelPrice:
     output_per_million_usd: float
 
 
+TOOL_CALL_MODEL = "tool_call"
+"""Sentinel "model" name for a tool/repository call span - never an LLM call, always $0."""
+
 PRICE_TABLE_USD_PER_MILLION_TOKENS: dict[str, ModelPrice] = {
     "gpt-4.1": ModelPrice(input_per_million_usd=2.00, output_per_million_usd=8.00),
     "gpt-4.1-mini": ModelPrice(input_per_million_usd=0.40, output_per_million_usd=1.60),
     "gpt-4.1-nano": ModelPrice(input_per_million_usd=0.10, output_per_million_usd=0.40),
     "gpt-4o": ModelPrice(input_per_million_usd=2.50, output_per_million_usd=10.00),
     "gpt-4o-mini": ModelPrice(input_per_million_usd=0.15, output_per_million_usd=0.60),
+    TOOL_CALL_MODEL: ModelPrice(input_per_million_usd=0.0, output_per_million_usd=0.0),
 }
 
 
@@ -49,6 +53,7 @@ def compute_cost_usd(model: str, tokens_in: int, tokens_out: int) -> float:
 
 __all__ = [
     "PRICE_TABLE_USD_PER_MILLION_TOKENS",
+    "TOOL_CALL_MODEL",
     "ModelPrice",
     "UnknownModelPriceError",
     "compute_cost_usd",

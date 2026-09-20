@@ -381,6 +381,100 @@ expects a single unified audit store** — as built, `data/schema.sql`'s
 different tables in two different database files that happen to share a
 name.
 
+## Agents SDK template (`agents/`, `orchestration/`, `tools/`, built Phase 4)
+
+Proves the OpenAI Agents SDK pattern end-to-end on exactly one agent
+(Customer 360) so every later agent (Conversation, Competitor, Offer
+Policy renderer, Supervisor) copies it rather than re-deriving it. Installed
+SDK: `openai-agents==0.22.3` (`pyproject.toml`'s `>=0.0.19` floor predates a
+lot of API surface used here — check the installed version before writing
+code against a different one, per the phase brief).
+
+- **`orchestration/context.py`** — `RunContext`, injected via
+  `RunContextWrapper[RunContext]`. Typed with `request: CustomerContextRequest`
+  because this phase builds exactly one agent; a later phase giving another
+  agent its own request shape should generalize this (union or a second
+  variant) rather than overload it. `evidence: list[EvidenceRef]` is a
+  mutable side channel — tools append to it as they read; nothing in
+  `contracts/` has room for evidence accumulated mid-run, so it has to live
+  here until `orchestration/runner.py` reads it back at the end.
+  `db_path` is descriptive metadata, not a live handle: every repository
+  function re-resolves `CHURNGUARD_DB_PATH` from the environment on every
+  call (`data/db.py::resolve_db_path`), so there is no connection object to
+  actually inject — same reasoning as Phase 3's separate audit DB decision
+  (extending, not fighting, a design `data/`/`config.py` already committed to).
+- **`orchestration/runner.py`** — `run_once()`, a thin wrapper: exactly one
+  `Runner.run()` call, timed by one `AgentSpan`, assembled into
+  `AgentResult[T]`. No retry, no deadline — those are layered on top in
+  `agents/base.py`, so a future caller that genuinely wants a single
+  unretried call still has one.
+- **`agents/base.py`** — `AgentSpec[T]` + `build_agent()` + `run_agent()`,
+  the shared factory/invocation template. `run_agent()` retries exactly once
+  on `agents.ModelBehaviorError` (the SDK's own exception for
+  malformed/schema-invalid model JSON — there is no built-in retry for this
+  in the SDK itself), converting a still-failing second attempt into
+  `SchemaViolationError`; wraps the whole (both-attempts) call in
+  `asyncio.wait_for(..., timeout=RunContext.deadline_ms / 1000)`, converting
+  a timeout into `DeadlineExceededError`. Both are typed exceptions a caller
+  can catch — `run_agent()` never lets a bare SDK exception or a
+  partially-assembled `AgentResult` escape. `build_agent()` wraps
+  `spec.output_type` in `AgentOutputSchema(..., strict_json_schema=False)`:
+  OpenAI's *strict* structured-output mode requires every JSON object's keys
+  enumerable up front, which `AccountContext.usage_by_line` (keyed by a line
+  ref that varies per account) cannot satisfy — non-strict mode still
+  validates the model's JSON against the full pydantic schema
+  (`extra="forbid"` and all), it just forgoes the provider-side schema
+  constraints strict mode adds on top. `model_override` (on both
+  `build_agent()` and `run_agent()`) swaps in a test double for the
+  *invocation* while `spec.model` (a plain string) stays what telemetry/cost
+  bills against.
+- **`tools/customer_tools.py`** — one `@function_tool` per `AccountContext`
+  domain (`billing`, `payment_history`, `plan_profile`, `device_financing`,
+  `usage`, `promotions`), plus `get_account_summary` (identity fields —
+  `account_ref`/`tenure_months`/`line_count`/`verification_results`/
+  `excluded_fields` — which aren't gated behind any domain). Every domain
+  tool checks `ctx.context.request.requested_domains` **before** touching a
+  repository and raises `DomainNotAuthorizedError` if refused; the SDK's own
+  tool-error handling turns a raised exception into a tool-output message
+  the model sees, never a crash of the run. The domain checked is fixed per
+  tool, not something the model supplies as an argument, so there's nothing
+  for an adversarial tool call to manipulate. Every tool returns
+  **pre-serialized JSON text** (`.model_dump_json()` / `json.dumps(...)`),
+  not a bare pydantic model or list: the SDK's default tool-output
+  stringification is `str(value)` (Python repr, not JSON) unless the tool
+  declares `output_type=`/`output_json_schema=`, and that path additionally
+  requires the *top-level* shape to be a JSON object, which rejects the
+  several tools here that return a bare list — pre-serializing sidesteps
+  both problems uniformly. Each tool wraps its repository call in its own
+  child `AgentSpan` (`model="tool_call"`, a dedicated zero-price
+  `cost.py` table entry — a tool call never invokes an LLM, so its cost is a
+  constant $0, not a token computation), nested under
+  `RunContext.agent_span_id`.
+- Multiple tool calls issued by the model in the same turn run
+  **concurrently** (confirmed empirically against the installed SDK version:
+  three 200ms-sleeping tools in one turn completed in ~360ms total, not
+  ~600ms) — this is why `get_account_summary` composing the full
+  `customer_repo.get_account_context()` (≈9 sequential 40ms-latency queries)
+  alongside six other tools making their own additional queries still meets
+  the <700ms p95 budget: wall-clock cost is the slowest branch, not the sum.
+
+### Test doubles (`tests/support/fake_model.py`)
+
+No real network/model calls happen in the test suite. Two `agents.Model`
+test doubles, since the SDK ships none itself:
+`ScriptedModel` (replays a fixed ordered list of turns regardless of
+conversation content — used to script a deliberately malformed final turn
+for the retry test) and `ToolCallingEchoModel` (a "well-behaved" fake:
+turn 1 calls every tool the agent has; once every call has a
+`function_call_output`, it hands a caller-supplied `assemble_output`
+callback a `{tool_name: parsed_json}` mapping and returns the result as the
+final message — this is what the golden tests use to exercise the real
+tool → repository → data wiring for 10 different seeded accounts without
+hardcoding per-account expected JSON or depending on a live model).
+`tests/conftest.py`'s session-scoped `seeded_db` fixture moved up from
+`tests/unit/conftest.py` in this phase so `tests/golden/` (and any future
+top-level test package) gets it too, without duplicating it.
+
 ## Phase plan (actual sequence, as given phase-by-phase — supersedes any earlier guess)
 
 Each phase brief so far has been delivered independently and hasn't matched
@@ -395,11 +489,14 @@ new phase arrives rather than trusting the remainder.
    repository.
 3. **Done.** Telemetry spine (`telemetry/`) — see "Telemetry spine" below.
    Independent of `data/` and `policy/`: consumes only `contracts/`.
-4-11. Not yet specified. Original draft guess (Conversation agent,
-   Customer 360 agent, Competitor agent, Supervisor orchestration,
-   confidence/telemetry, approval workflow, execution boundary, FastAPI,
-   Streamlit UI) is unconfirmed and increasingly unlikely to match the
-   real order — don't plan around it.
+4. **Done.** Customer 360 agent (`agents/customer.py`) + the shared
+   agents-SDK template (`agents/base.py`, `orchestration/`, `tools/customer_tools.py`)
+   every later agent copies — see "Agents SDK template" below.
+5-11. Not yet specified. Original draft guess (Conversation agent,
+   Competitor agent, Supervisor orchestration, confidence/telemetry,
+   approval workflow, execution boundary, FastAPI, Streamlit UI) is
+   unconfirmed and increasingly unlikely to match the real order — don't
+   plan around it.
 11. Streamlit UI (`ui/`) + end-to-end demo, `experiments/` for offline
     tuning.
 
@@ -498,3 +595,48 @@ commands directly (see Makefile).
 - Confirmed independent: `telemetry/` imports only `contracts/` and
   `config.py`, never `churnguard.data` or `churnguard.policy`.
 - Out of scope, as specified: no agents, no UI dashboards — spine only.
+
+## Phase 4 acceptance status
+
+- `pytest` passes (179 tests total; 39 new — `tests/golden/test_customer_agent.py`
+  (parametrized over the first 10 seeded accounts), `tests/unit/test_agent_retry.py`,
+  `tests/unit/test_tool_authorization.py`): `Runner.run` produces a
+  schema-valid `AgentResult[AccountContext]` for `ACCT_****4471` matching
+  the seeded values exactly (bill 198.43, delta 33.23, three
+  `delta_attribution` entries, financing payoff 312.40); that account's
+  `usage_by_line.LINE_****03` is `null`, asserted to produce
+  `status="partial"` with `missing_evidence=["usage_by_line.LINE_****03"]`;
+  tool calls are asserted to appear as child spans (via `export_trace`)
+  under the agent's own span, each with `model="tool_call"`,
+  `cost_usd=0.0`, and a real measured latency; p95 latency across the 10
+  accounts is asserted under 700ms with `DB_LATENCY_MS=40`
+  (measured ≈520ms); a `ScriptedModel` returning malformed JSON twice is
+  asserted to retry exactly once (`model.call_count == 2`) then raise
+  `SchemaViolationError` chained from the SDK's `ModelBehaviorError`,
+  never a bare crash; a slow model is asserted to raise
+  `DeadlineExceededError`, not a bare `asyncio.TimeoutError`; every domain
+  tool is asserted to raise `DomainNotAuthorizedError` — and to leave
+  `RunContext.evidence` untouched — when its domain is absent from
+  `requested_domains`, and to succeed when it's present;
+  `get_account_summary` is asserted never gated behind any domain.
+- `mypy --strict` passes on `src/churnguard/contracts`, `src/churnguard/data`,
+  `src/churnguard/policy`, `src/churnguard/telemetry`, `src/churnguard/orchestration`,
+  `src/churnguard/agents` **and** `src/churnguard/tools` (Makefile/CI updated).
+  One Phase 3 fix needed along the way: `AgentSpan.__aexit__`'s return type
+  was `bool`; mypy strict can't prove a `with`-block's lone `return` is
+  reached unless `__aexit__` is typed `Literal[False]` (otherwise it
+  conservatively assumes the exception the `return`'s expression might
+  raise could be swallowed, and flags a "missing return"), so it was
+  narrowed — no behavior change, `__aexit__` always returned `False` already.
+- `ruff check` passes on `src`, `tests`, `scripts`.
+- Known pre-existing flake, not introduced by this phase: `tests/unit/test_db_access.py::test_db_latency_ms_is_injected_per_query`
+  occasionally fails (`elapsed_ms` under its 3ms floor for a nominal 5ms
+  `asyncio.sleep`) when run in the same session as other async-heavy test
+  files — reproduces even paired with unrelated pre-existing Phase 1/2
+  files, so it's Windows event-loop timer-resolution flakiness in a
+  tight wall-clock assertion, not a Phase 4 regression. Left as-is
+  (Phase 1 is "done"); flag if it starts failing CI regularly.
+- `tests/conftest.py` now holds the shared `seeded_db` fixture (moved from
+  `tests/unit/conftest.py`) so `tests/golden/` gets it too.
+- Out of scope, as specified: no other agents, no Supervisor, no
+  orchestration beyond a single run.

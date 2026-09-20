@@ -32,7 +32,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import TracebackType
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 from agents import tracing as sdk_tracing
 
@@ -175,7 +175,12 @@ class AgentSpan:
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
         tb: TracebackType | None,
-    ) -> bool:
+    ) -> Literal[False]:
+        # Literal[False], not bool: callers (e.g. mypy analyzing a lone return
+        # inside `async with AgentSpan(...): return await x`) need to know
+        # statically that a span never suppresses an exception, or they see a
+        # spurious "Missing return statement" - the with-block could otherwise
+        # look like it might swallow an exception and fall through.
         latency_ms = int((time.perf_counter() - self._start_perf) * 1000)
         status: SpanStatus = "error" if exc_type is not None else "ok"
         cost_usd = compute_cost_usd(self.model, self.tokens_in, self.tokens_out)
