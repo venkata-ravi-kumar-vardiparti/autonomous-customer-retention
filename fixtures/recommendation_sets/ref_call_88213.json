@@ -1,0 +1,473 @@
+{
+  "call_id": "CALL_****8213",
+  "account_summary": {
+    "account_ref": "ACCT_****4471",
+    "current_monthly": 198.43,
+    "prior_monthly": 165.2,
+    "tenure_months": 74,
+    "line_count": 4
+  },
+  "transcript_window": [
+    {
+      "ts": "2026-09-19T14:00:00Z",
+      "speaker": "customer",
+      "text": "Hi, I want to cancel my service. My bill jumped by fifty dollars and I don't understand why."
+    },
+    {
+      "ts": "2026-09-19T14:00:08Z",
+      "speaker": "agent",
+      "text": "I'm sorry to hear that - let me pull up your account."
+    },
+    {
+      "ts": "2026-09-19T14:00:15Z",
+      "speaker": "customer",
+      "text": "Also - separate from the billing thing - my phone on line 3 keeps dropping calls near my house in Frisco, Texas. It's been happening for weeks."
+    },
+    {
+      "ts": "2026-09-19T14:00:28Z",
+      "speaker": "customer",
+      "text": "RivalCo is offering me forty five dollars a line, way less than what I'm paying now."
+    }
+  ],
+  "conversation_signals": {
+    "intents": [
+      {
+        "type": "cancel_service",
+        "confidence": 0.9,
+        "scope": null,
+        "span_refs": [
+          "[00:00]"
+        ]
+      },
+      {
+        "type": "billing_dispute",
+        "confidence": 0.85,
+        "scope": null,
+        "span_refs": [
+          "[00:00]"
+        ]
+      }
+    ],
+    "churn_signals": [
+      {
+        "signal": "explicit_cancel_request",
+        "strength": "high"
+      }
+    ],
+    "competitor_claims": [
+      {
+        "carrier": "RivalCo",
+        "price": 45.0,
+        "unit": "per_line",
+        "source": "customer_stated",
+        "span_refs": [
+          "[00:28]"
+        ]
+      }
+    ],
+    "customer_stated_figures": [
+      {
+        "field": "bill_increase",
+        "value": 50.0,
+        "precision": "approximate"
+      }
+    ],
+    "unresolved_concerns": [
+      {
+        "issue": "dropped calls / network issue",
+        "line_ref": "LINE_****03",
+        "location": "Frisco, TX",
+        "since": null,
+        "customer_flagged_separate": true
+      }
+    ],
+    "sentiment_trajectory": "frustrated, seeking to cancel",
+    "verification_tasks": []
+  },
+  "recommendation_set": {
+    "recommendation_set_id": "REC_6e6662ebcdae4c559f1293745f3e6ba8",
+    "call_id": "CALL_****8213",
+    "generated_at": "2026-09-20T13:41:45.130150Z",
+    "overall_confidence": 0.89,
+    "confidence_adjustments": [
+      {
+        "reason": "missing usage telemetry on LINE_****03 corroborates the customer-reported issue on that line",
+        "delta": -0.03
+      },
+      {
+        "reason": "competitor pricing is stale (42d old)",
+        "delta": -0.08
+      }
+    ],
+    "recommendations": [
+      {
+        "rank": 1,
+        "offer_id": "C1",
+        "title": "Restore and explain",
+        "components": [
+          {
+            "code": "RET_LOYALTY_CREDIT_REINSTATEMENT",
+            "monthly": -20.0,
+            "duration_months": 12
+          },
+          {
+            "code": "BIL_AUTOPAY_DISCOUNT_RESTORE",
+            "monthly": -8.0,
+            "duration_months": null
+          }
+        ],
+        "customer_impact": {
+          "monthly_delta": -28.0,
+          "annualized_delta": -336.0,
+          "description": "Bill changes from $198.43 to $170.43/mo"
+        },
+        "rationale": "Reinstates the loyalty credit and autopay discount lost this cycle - the real cause of the $33.23 increase, not the $50 the customer believed.",
+        "confidence": 0.95,
+        "approval_tier_required": 1,
+        "required_disclosures": [],
+        "evidence_ids": [
+          "EVID_PAYHIST_4471",
+          "EVID_DEVFIN_DEV-000001",
+          "EVID_PLAN_4471",
+          "EVID_USAGE_4471_1",
+          "EVID_USAGE_4471_2",
+          "EVID_USAGE_4471_3",
+          "EVID_USAGE_4471_4",
+          "EVID_BILL_TOTAL_4471_current",
+          "EVID_BILL_TOTAL_4471_prior",
+          "EVID_BILL_EVT-000003",
+          "EVID_BILL_EVT-000004",
+          "EVID_BILL_EVT-000005",
+          "EVID_ACCT_4471"
+        ],
+        "talk_track": "I can restore your loyalty credit and autopay discount right now, bringing you back to $170.43 a month - and I can walk you through exactly why your bill changed.",
+        "hold_condition": null
+      },
+      {
+        "rank": 2,
+        "offer_id": "C2",
+        "title": "Switch to a lower-hotspot plan",
+        "components": [
+          {
+            "code": "PLN_HOTSPOT_REDUCTION_MIGRATION",
+            "monthly": -38.44,
+            "duration_months": null
+          }
+        ],
+        "customer_impact": {
+          "monthly_delta": -38.44,
+          "annualized_delta": -461.28,
+          "description": "Bill changes from $198.43 to $159.99/mo"
+        },
+        "rationale": "Lowers the monthly bill by reducing mobile hotspot allowance - worth offering given the customer's cost concern.",
+        "confidence": 0.75,
+        "approval_tier_required": 1,
+        "required_disclosures": [
+          {
+            "code": "DISC_HOTSPOT_REDUCTION",
+            "text": "This plan change reduces your mobile hotspot allowance from 50GB to 15GB per month.",
+            "must_be_read_verbatim": true
+          }
+        ],
+        "evidence_ids": [
+          "EVID_PAYHIST_4471",
+          "EVID_DEVFIN_DEV-000001",
+          "EVID_PLAN_4471",
+          "EVID_USAGE_4471_1",
+          "EVID_USAGE_4471_2",
+          "EVID_USAGE_4471_3",
+          "EVID_USAGE_4471_4",
+          "EVID_BILL_TOTAL_4471_current",
+          "EVID_BILL_TOTAL_4471_prior",
+          "EVID_BILL_EVT-000003",
+          "EVID_BILL_EVT-000004",
+          "EVID_BILL_EVT-000005",
+          "EVID_ACCT_4471"
+        ],
+        "talk_track": "If hotspot data isn't critical for you, I can move you to a plan at $159.99 a month - it does reduce hotspot from 50GB to 15GB, which I'm required to walk you through.",
+        "hold_condition": null
+      },
+      {
+        "rank": 3,
+        "offer_id": "C3",
+        "title": "Loyalty and device credit bundle",
+        "components": [
+          {
+            "code": "RET_LOYALTY_CREDIT",
+            "monthly": -20.0,
+            "duration_months": 12
+          },
+          {
+            "code": "FIN_DEVICE_CREDIT",
+            "monthly": -18.0,
+            "duration_months": 10
+          }
+        ],
+        "customer_impact": {
+          "monthly_delta": -38.0,
+          "annualized_delta": -456.0,
+          "description": "Bill changes from $198.43 to $160.43/mo"
+        },
+        "rationale": "Combines a loyalty credit with a device-financing credit on the line-3 handset.",
+        "confidence": 0.85,
+        "approval_tier_required": 2,
+        "required_disclosures": [],
+        "evidence_ids": [
+          "EVID_PAYHIST_4471",
+          "EVID_DEVFIN_DEV-000001",
+          "EVID_PLAN_4471",
+          "EVID_USAGE_4471_1",
+          "EVID_USAGE_4471_2",
+          "EVID_USAGE_4471_3",
+          "EVID_USAGE_4471_4",
+          "EVID_BILL_TOTAL_4471_current",
+          "EVID_BILL_TOTAL_4471_prior",
+          "EVID_BILL_EVT-000003",
+          "EVID_BILL_EVT-000004",
+          "EVID_BILL_EVT-000005",
+          "EVID_ACCT_4471"
+        ],
+        "talk_track": "I can also combine a loyalty credit with a device credit, bringing your bill to $160.43 a month, pending a supervisor's confirmation of the payoff amount.",
+        "hold_condition": "Confirm the device financing payoff amount with the customer before finalizing."
+      }
+    ],
+    "mandatory_actions": [
+      "open_network_ticket:LINE_****03:Frisco, TX"
+    ],
+    "blocked_candidates": [],
+    "agent_context_notes": [
+      "Customer believes their bill rose by $50.00; the actual increase is $33.23, attributed to: loyalty_promo_expired, autopay_discount_lost, regulatory_fee_increase. Reframing this is itself the top retention lever."
+    ],
+    "fallbacks_applied": [],
+    "commitment_status": "none",
+    "approval": {
+      "min_tier_required": 2,
+      "requires_second_approver": true,
+      "disclosures_pending": [
+        "DISC_HOTSPOT_REDUCTION"
+      ]
+    },
+    "trace": {
+      "trace_id": "trace_d9bfe0c163eb4e06ab72b4affcf5caf6",
+      "span_id": "span_235a3f0506644eac8342bd9b",
+      "agent_calls": [
+        "conversation",
+        "customer_360",
+        "competitor",
+        "policy_engine",
+        "supervisor_render"
+      ]
+    }
+  },
+  "trace_export": {
+    "trace_id": "trace_d9bfe0c163eb4e06ab72b4affcf5caf6",
+    "spans": [
+      {
+        "span_id": "span_0f676955a76841fb8e7bfbf9",
+        "parent_span_id": null,
+        "name": "conversation",
+        "status": "ok",
+        "started_at": "2026-09-20T13:41:45.047030+00:00",
+        "ended_at": "2026-09-20T13:41:45.053031+00:00",
+        "telemetry": {
+          "model": "gpt-4.1-mini",
+          "latency_ms": 6,
+          "tokens_in": 10,
+          "tokens_out": 10,
+          "cost_usd": 2e-05,
+          "cache_hit": false
+        },
+        "children": []
+      },
+      {
+        "span_id": "span_a61e23ec6d924312bc3557fe",
+        "parent_span_id": null,
+        "name": "competitor",
+        "status": "ok",
+        "started_at": "2026-09-20T13:41:45.078255+00:00",
+        "ended_at": "2026-09-20T13:41:45.099334+00:00",
+        "telemetry": {
+          "model": "gpt-4.1-mini",
+          "latency_ms": 21,
+          "tokens_in": 20,
+          "tokens_out": 20,
+          "cost_usd": 4e-05,
+          "cache_hit": false
+        },
+        "children": [
+          {
+            "span_id": "span_dbde366ffcad4fac9a621ec4",
+            "parent_span_id": "span_a61e23ec6d924312bc3557fe",
+            "name": "tool:get_competitor_snapshots",
+            "status": "ok",
+            "started_at": "2026-09-20T13:41:45.087256+00:00",
+            "ended_at": "2026-09-20T13:41:45.094335+00:00",
+            "telemetry": {
+              "model": "tool_call",
+              "latency_ms": 6,
+              "tokens_in": 0,
+              "tokens_out": 0,
+              "cost_usd": 0.0,
+              "cache_hit": false
+            },
+            "children": []
+          }
+        ]
+      },
+      {
+        "span_id": "span_b0787ff9642f4075b8964050",
+        "parent_span_id": null,
+        "name": "customer_360",
+        "status": "ok",
+        "started_at": "2026-09-20T13:41:45.074737+00:00",
+        "ended_at": "2026-09-20T13:41:45.124551+00:00",
+        "telemetry": {
+          "model": "gpt-4.1-mini",
+          "latency_ms": 49,
+          "tokens_in": 20,
+          "tokens_out": 20,
+          "cost_usd": 4e-05,
+          "cache_hit": false
+        },
+        "children": [
+          {
+            "span_id": "span_378df94627374e7ea63aa85c",
+            "parent_span_id": "span_b0787ff9642f4075b8964050",
+            "name": "tool:get_active_promotions",
+            "status": "ok",
+            "started_at": "2026-09-20T13:41:45.087256+00:00",
+            "ended_at": "2026-09-20T13:41:45.101354+00:00",
+            "telemetry": {
+              "model": "tool_call",
+              "latency_ms": 14,
+              "tokens_in": 0,
+              "tokens_out": 0,
+              "cost_usd": 0.0,
+              "cache_hit": false
+            },
+            "children": []
+          },
+          {
+            "span_id": "span_efa448c41917416a866cf347",
+            "parent_span_id": "span_b0787ff9642f4075b8964050",
+            "name": "tool:get_payment_history",
+            "status": "ok",
+            "started_at": "2026-09-20T13:41:45.085258+00:00",
+            "ended_at": "2026-09-20T13:41:45.102363+00:00",
+            "telemetry": {
+              "model": "tool_call",
+              "latency_ms": 17,
+              "tokens_in": 0,
+              "tokens_out": 0,
+              "cost_usd": 0.0,
+              "cache_hit": false
+            },
+            "children": []
+          },
+          {
+            "span_id": "span_6310bf531ffe488f9295ab7f",
+            "parent_span_id": "span_b0787ff9642f4075b8964050",
+            "name": "tool:get_device_financing",
+            "status": "ok",
+            "started_at": "2026-09-20T13:41:45.086260+00:00",
+            "ended_at": "2026-09-20T13:41:45.102363+00:00",
+            "telemetry": {
+              "model": "tool_call",
+              "latency_ms": 16,
+              "tokens_in": 0,
+              "tokens_out": 0,
+              "cost_usd": 0.0,
+              "cache_hit": false
+            },
+            "children": []
+          },
+          {
+            "span_id": "span_224f767a9da146e6b12e85be",
+            "parent_span_id": "span_b0787ff9642f4075b8964050",
+            "name": "tool:get_plan_profile",
+            "status": "ok",
+            "started_at": "2026-09-20T13:41:45.085258+00:00",
+            "ended_at": "2026-09-20T13:41:45.103363+00:00",
+            "telemetry": {
+              "model": "tool_call",
+              "latency_ms": 17,
+              "tokens_in": 0,
+              "tokens_out": 0,
+              "cost_usd": 0.0,
+              "cache_hit": false
+            },
+            "children": []
+          },
+          {
+            "span_id": "span_4231f295c46841778cb05eff",
+            "parent_span_id": "span_b0787ff9642f4075b8964050",
+            "name": "tool:get_usage_by_line",
+            "status": "ok",
+            "started_at": "2026-09-20T13:41:45.086260+00:00",
+            "ended_at": "2026-09-20T13:41:45.105370+00:00",
+            "telemetry": {
+              "model": "tool_call",
+              "latency_ms": 18,
+              "tokens_in": 0,
+              "tokens_out": 0,
+              "cost_usd": 0.0,
+              "cache_hit": false
+            },
+            "children": []
+          },
+          {
+            "span_id": "span_cdd617fa9763408b88b770ed",
+            "parent_span_id": "span_b0787ff9642f4075b8964050",
+            "name": "tool:get_billing",
+            "status": "ok",
+            "started_at": "2026-09-20T13:41:45.084255+00:00",
+            "ended_at": "2026-09-20T13:41:45.107382+00:00",
+            "telemetry": {
+              "model": "tool_call",
+              "latency_ms": 22,
+              "tokens_in": 0,
+              "tokens_out": 0,
+              "cost_usd": 0.0,
+              "cache_hit": false
+            },
+            "children": []
+          },
+          {
+            "span_id": "span_5f2f24d4a0ee411e857e1017",
+            "parent_span_id": "span_b0787ff9642f4075b8964050",
+            "name": "tool:get_account_summary",
+            "status": "ok",
+            "started_at": "2026-09-20T13:41:45.084255+00:00",
+            "ended_at": "2026-09-20T13:41:45.120043+00:00",
+            "telemetry": {
+              "model": "tool_call",
+              "latency_ms": 36,
+              "tokens_in": 0,
+              "tokens_out": 0,
+              "cost_usd": 0.0,
+              "cache_hit": false
+            },
+            "children": []
+          }
+        ]
+      },
+      {
+        "span_id": "span_c8a6d52ebfc24447865e202f",
+        "parent_span_id": null,
+        "name": "supervisor_render",
+        "status": "ok",
+        "started_at": "2026-09-20T13:41:45.129152+00:00",
+        "ended_at": "2026-09-20T13:41:45.130150+00:00",
+        "telemetry": {
+          "model": "gpt-4.1",
+          "latency_ms": 1,
+          "tokens_in": 10,
+          "tokens_out": 10,
+          "cost_usd": 0.0001,
+          "cache_hit": false
+        },
+        "children": []
+      }
+    ]
+  }
+}

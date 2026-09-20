@@ -7,10 +7,10 @@ test:
 	uv run pytest
 
 lint:
-	uv run ruff check src tests scripts
+	uv run ruff check src tests scripts ui
 
 typecheck:
-	uv run mypy --strict src/churnguard/contracts src/churnguard/data src/churnguard/policy src/churnguard/telemetry src/churnguard/orchestration src/churnguard/agents src/churnguard/tools src/churnguard/guardrails src/churnguard/offers src/churnguard/approval src/churnguard/execution src/churnguard/api
+	uv run mypy --strict src/churnguard/contracts src/churnguard/data src/churnguard/policy src/churnguard/telemetry src/churnguard/orchestration src/churnguard/agents src/churnguard/tools src/churnguard/guardrails src/churnguard/offers src/churnguard/approval src/churnguard/execution src/churnguard/api ui
 
 schemas:
 	uv run python scripts/export_schemas.py
