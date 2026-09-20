@@ -8,3 +8,9 @@ __pycache__/
 .ruff_cache/
 *.db
 /churnguard_audit.jsonl
+
+# experiments/run_ab.py + report.py output - generated, not committed
+# (the scripts are the deliverable; regenerate with `python -m experiments.run_ab`)
+/experiments/ab_results.json
+/experiments/report/
+/experiments/report_output/

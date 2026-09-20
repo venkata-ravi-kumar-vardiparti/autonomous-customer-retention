@@ -120,7 +120,12 @@ async def run_agent[T](
     *,
     max_retries: int = 1,
     model_override: str | Model | None = None,
+    max_turns: int | None = None,
 ) -> AgentResult[T]:
+    """max_turns (Phase 11): threaded straight through to
+    orchestration/runner.py::run_once - see that function's own docstring.
+    None (every caller before orchestration/harness.py) leaves the SDK's
+    own default untouched."""
     agent = build_agent(spec, model_override=model_override)
     run_config = RunConfig(tracing_disabled=True)
 
@@ -136,6 +141,7 @@ async def run_agent[T](
                     model=spec.model,
                     run_config=run_config,
                     detect_missing_evidence=spec.detect_missing_evidence,
+                    max_turns=max_turns,
                 )
             except InputGuardrailTripwireTriggered as exc:
                 # Never retried: the same input would trip the same guardrail again.

@@ -2,63 +2,50 @@
 policy-cleared RecommendationSet.
 
 Two orchestration modes exist on the frozen SupervisorInput.orchestration_mode
-contract field, with two different implementations:
+contract field:
 
 - "bounded_pipeline" (orchestration/bounded.py): plain code decides the
   fan-out, the hard policy filter and the ranking - no LLM anywhere in that
-  decision path. This is what every acceptance test in tests/e2e/
-  exercises (deterministic rank order, a policy filter that can't be
-  bypassed by model behaviour, a <2s p95 budget). The one LLM call in that
-  path is `render_recommendation_copy` below - the LARGE model renders
-  title/rationale/talk_track prose around numbers that are already fully
-  computed, exactly like the Offer Policy pack's disclosure text and the
-  Competitor agent's narrative framing. It can never change a rank, a
-  price, or a verdict; if it fails or times out, orchestration/bounded.py
-  falls back to templated copy (see fallbacks_applied) rather than ever
-  blocking on it.
-- "open_harness" (build_supervisor_tools/SUPERVISOR_SPEC below): a real
-  Agent, on the gpt-4.1 LARGE model - the only agent in ChurnGuard on that
-  tier; every specialist stays on gpt-4.1-mini (see each agent's own MODEL
-  constant) - whose tools ARE the other three specialist agents themselves,
-  wired in via Agent.as_tool(...): agents-as-tools, never handoffs. A
-  handoff would transfer the whole run to one sub-agent and lose
-  ChurnGuard's own turn; agents-as-tools lets the Supervisor call several
-  specialists as ordinary tool calls in the same turn (the SDK already runs
-  same-turn tool calls concurrently - see agents/base.py's Phase 4 notes)
-  and still see every result itself, to reconcile. This mode is exploratory
-  (an LLM decides call order/count, so it has none of the bounded
-  pipeline's latency or determinism guarantees) and is not exercised by
-  tests/e2e - it exists so orchestration_mode has a real implementation on
-  both sides of the Literal, not a dead enum value. A known, documented
-  limitation: RunContext.request is a single field per run (Phase 4/5/6's
-  design for narrowing a tool's own request type), so a Supervisor agent
-  actually driving this mode end-to-end would need a per-tool-call context
-  scheme beyond what's built here - out of scope for this phase.
+  decision path.
+- "open_harness" (orchestration/harness.py, Phase 11): a real Supervisor
+  Agent, on the gpt-4.1 LARGE model (SUPERVISOR_MODEL below - the only
+  agent in ChurnGuard on that tier; every specialist stays on
+  gpt-4.1-mini), freely decides which evidence to gather and in what
+  order, in a loop, until it decides it has enough (max turns bounded for
+  safety). See orchestration/harness.py's own docstring for why its tools
+  are hand-wrapped versions of run_conversation_agent /
+  run_agent(CUSTOMER_360_SPEC) / run_competitor_agent, NOT the SDK's
+  Agent.as_tool() applied directly to the bare specialist Agents (an
+  earlier Phase 7 sketch tried that and is superseded here - as_tool()'s
+  nested Runner.run() bypasses agents/conversation.py's prompt-injection
+  sanitization and agents/competitor.py's deterministic price-normalizer
+  overwrite, neither of which any phase is allowed to weaken).
 
-Regardless of mode, the Supervisor never decides an offer's eligibility
-itself: policy.engine.evaluate's verdicts are an unconditional hard filter,
-called directly in the bounded pipeline or via the evaluate_policy tool in
-open_harness mode - the model only ever renders text around an
-already-computed verdict.
+In BOTH modes, candidate generation, policy evaluation (an unconditional
+hard filter - see orchestration/assemble.py), ranking and rendering are
+the exact same function call (orchestration/assemble.py::assemble_recommendation_set) -
+the Supervisor (in either mode) never decides an offer's eligibility
+itself. `render_recommendation_copy` below is that shared assembly step's
+one LLM call: the LARGE model renders title/rationale/talk_track prose
+around numbers that are already fully computed, exactly like the Offer
+Policy pack's disclosure text and the Competitor agent's narrative
+framing. It can never change a rank, a price, or a verdict; if it fails or
+times out, the caller falls back to templated copy (fallbacks_applied)
+rather than ever blocking on it.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agents import Model, RunContextWrapper, Tool, function_tool
+from agents import Model
 from pydantic import BaseModel, ConfigDict
 
-from churnguard.agents.base import AgentSpec, build_agent, run_agent
-from churnguard.agents.competitor import COMPETITOR_SPEC
-from churnguard.agents.conversation import CONVERSATION_SPEC
-from churnguard.agents.customer import CUSTOMER_360_SPEC
+from churnguard.agents.base import AgentSpec, run_agent
 from churnguard.contracts.conversation import ConversationSignals
 from churnguard.contracts.customer import AccountContext, CustomerContextRequest
-from churnguard.contracts.policy import PolicyEvaluationRequest, Verdict
-from churnguard.contracts.recommendation import RecommendationSet
+from churnguard.contracts.policy import Verdict
 from churnguard.orchestration.context import RunContext
-from churnguard.policy import engine as policy_engine
 from churnguard.telemetry.tracer import new_span_id
 
 if TYPE_CHECKING:
@@ -67,82 +54,11 @@ if TYPE_CHECKING:
 SUPERVISOR_MODEL = "gpt-4.1"
 """The one LARGE-tier agent in ChurnGuard - see each specialist's own
 MODEL constant (agents/customer.py, agents/conversation.py,
-agents/competitor.py), all gpt-4.1-mini."""
+agents/competitor.py), all gpt-4.1-mini. orchestration/harness.py's
+open-ended Supervisor loop also runs on this model."""
 
 
-# --- open_harness: agents-as-tools wiring -----------------------------------
-
-
-async def _evaluate_policy_impl(ctx: RunContextWrapper[RunContext], request_json: str) -> str:
-    """Even in open_harness mode the verdict stays deterministic code - the
-    model supplies a PolicyEvaluationRequest, never a verdict."""
-    request = PolicyEvaluationRequest.model_validate_json(request_json)
-    result = policy_engine.evaluate(request)
-    return result.model_dump_json()
-
-
-evaluate_policy = function_tool(_evaluate_policy_impl, name_override="evaluate_policy")
-
-
-def build_supervisor_tools() -> list[Tool]:
-    """Wraps the three specialist agents as callable tools via Agent.as_tool -
-    agents-as-tools, not handoffs. Each call still runs the specialist's own
-    real Agent object (same instructions/tools/output_type build_agent()
-    always uses); it does not go through agents/base.py's run_agent, so a
-    Supervisor-driven call in this mode does not get its own retry/deadline
-    handling layered on top - open_harness's tradeoff, not the bounded
-    pipeline's, which calls run_agent directly for exactly that guarantee.
-    """
-    return [
-        build_agent(CUSTOMER_360_SPEC).as_tool(
-            tool_name="customer_360",
-            tool_description=(
-                "Retrieve and structure the account's billing, payment, financing, "
-                "plan and usage picture."
-            ),
-        ),
-        build_agent(CONVERSATION_SPEC).as_tool(
-            tool_name="conversation",
-            tool_description=(
-                "Extract intents, churn signals, competitor claims, customer-stated "
-                "figures and unresolved concerns from the live transcript."
-            ),
-        ),
-        build_agent(COMPETITOR_SPEC).as_tool(
-            tool_name="competitor",
-            tool_description=(
-                "Resolve a like-for-like competitor price comparison, switching "
-                "costs and claim reconciliation from curated snapshots."
-            ),
-        ),
-        evaluate_policy,
-    ]
-
-
-SUPERVISOR_INSTRUCTIONS = """
-You are the Supervisor agent inside ChurnGuard, a telecom retention
-decision-support system. A human retention agent is on a live call; you
-reconcile the Conversation, Customer 360 and Competitor agents' views into
-one ranked, evidence-cited RecommendationSet.
-
-You NEVER decide whether an offer is eligible yourself - always call
-evaluate_policy and treat its verdicts as final; an offer it blocks must
-never appear as a recommendation. You NEVER compute a price, a discount,
-or a confidence score - report exactly what your tools return. ChurnGuard
-only recommends; it never executes anything, and commitment_status must
-always be "none".
-"""
-
-SUPERVISOR_SPEC = AgentSpec(
-    name="supervisor",
-    output_type=RecommendationSet,
-    instructions=SUPERVISOR_INSTRUCTIONS,
-    tools=build_supervisor_tools(),
-    model=SUPERVISOR_MODEL,
-)
-
-
-# --- bounded_pipeline: render-only LLM step ---------------------------------
+# --- shared assembly step: render-only LLM call -----------------------------
 
 
 class _RenderedCopy(BaseModel):
@@ -273,10 +189,6 @@ async def render_recommendation_copy(
 
 __all__ = [
     "RENDER_SPEC",
-    "SUPERVISOR_INSTRUCTIONS",
     "SUPERVISOR_MODEL",
-    "SUPERVISOR_SPEC",
-    "build_supervisor_tools",
-    "evaluate_policy",
     "render_recommendation_copy",
 ]

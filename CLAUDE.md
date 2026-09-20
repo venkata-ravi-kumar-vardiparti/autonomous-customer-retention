@@ -1144,6 +1144,106 @@ hit or a lingering loaded cache from one test could silently bypass
 another test's monkeypatched repository failure (FAULT SCENARIO 4's own
 test would otherwise risk a false pass).
 
+## A/B measurement: bounded pipeline vs open harness (`orchestration/harness.py`, `experiments/run_ab.py`, `experiments/report.py`, built Phase 11)
+
+Objective: quantify the reliability/cost/context trade-off between the two
+`SupervisorInput.orchestration_mode` values instead of asserting it. The
+NON-NEGOTIABLE rule — "the ONLY difference between arms is
+orchestration_mode... the policy engine remains a hard filter in BOTH
+arms" — is enforced structurally, not by convention: three modules
+(`orchestration/queries.py`, `orchestration/fallbacks.py`,
+`orchestration/assemble.py`) were factored out of `orchestration/bounded.py`
+in this phase specifically so both arms call the *exact same* envelope
+builders, degraded-result builders, and candidate-generation/policy-
+evaluation/ranking/rendering function. There is no second implementation
+of any of those anywhere in the codebase for `orchestration/harness.py` to
+have quietly drifted from.
+
+### Why `orchestration/harness.py` doesn't use `Agent.as_tool()` on the bare specialist Agents
+
+Phase 7's original open_harness sketch (`agents/supervisor.py::build_supervisor_tools`,
+now removed) did exactly that, flagged even then as having "a known,
+documented limitation." Reading the installed SDK's own `as_tool()`
+implementation this phase resolved the ambiguity: with the default
+(unstructured) tool input, the nested `Runner.run()` call sets
+`nested_context = context.context` — the parent's own `RunContext` object,
+**by reference**, not a copy — and, more importantly, calls
+`Runner.run(starting_agent=self, ...)` directly, bypassing every one of
+`agents/conversation.py::run_conversation_agent` (prompt-injection
+sanitization), `agents/competitor.py::run_competitor_agent` (the
+deterministic "LLM must never compute a price" overwrite) and
+`agents/base.py::run_agent` (retry-on-schema-violation, deadline
+enforcement) entirely. None of those guarantees is something Phase 11 is
+allowed to weaken to make the open arm "more open." So
+`orchestration/harness.py` instead wraps `run_conversation_agent` /
+`run_agent(CUSTOMER_360_SPEC)` / `run_competitor_agent` **themselves** as
+three `@function_tool`-decorated closures, built fresh per call (closing
+over that call's `SupervisorInput` and a mutable `_EvidenceBasket`, since
+three different specialist request types can't share `RunContext`'s single
+`request` field) — the model's freedom is which of these three tools to
+call and when, never what they do internally.
+
+### The harness's freedom is scoped to evidence-gathering, never eligibility
+
+`fetch_conversation_signals` / `fetch_customer_360` / `fetch_competitor_comparison`
+are the model's only tools; it calls zero, one, or many of them, in any
+order, until it returns a `HarnessDecision` (a structured "I'm done"
+signal, never consulted for pricing or eligibility) or hits
+`MAX_HARNESS_TURNS` (8 — `agents.MaxTurnsExceeded`, caught and treated as
+"stop, hand off whatever the tools already gathered," not a failure).
+Whatever the loop did or didn't gather is then resolved through the
+**exact same fallback builders** `orchestration/bounded.py` uses for a
+dead repository connection (`orchestration/fallbacks.py`): an
+evidence-gathering tool the model never called is exactly as absent as one
+that failed outright, and gets the identical degraded, clearly-flagged
+treatment either way — down to the account bootstrap fallback and the
+`aggregate.degraded_agent_adjustment` confidence penalty. The resolved
+`(account, signals, competitor)` tuple is then handed to the identical
+`assemble_recommendation_set` the bounded arm calls — see
+`tests/e2e/test_ab_parity.py::test_harness_gathering_nothing_still_uses_the_same_policy_engine`,
+which proves this holds even in the worst case (the harness calls no
+tools at all).
+
+### An observed source of open-harness variance, found without live credentials
+
+`fetch_competitor_comparison`'s query depends on whatever conversation
+signals have been gathered *so far* — but concurrently-dispatched tool
+calls in the same turn (the SDK's own documented behaviour, per Phase 4's
+notes) can interleave, so if `fetch_competitor_comparison` runs before
+`fetch_conversation_signals` has actually completed, it falls back to the
+default carrier list instead of whichever carrier the customer actually
+named. This was caught empirically during development (not hypothesized):
+one fake-model run resolved the ACCT_****4471 reference scenario's
+competitor snapshot as fresh instead of stale, purely because of
+asyncio scheduling order, with `--fake` and zero model randomness
+involved. It never changed which offer ranked first in testing (C1's
+reversible billing credit dominates the ranking too strongly for this
+worked example), but it is a genuine, reproducible-in-principle source of
+open-harness nondeterminism that costs nothing to demonstrate — no
+`OPENAI_API_KEY` required, unlike model-sampling variance.
+
+### `experiments/run_ab.py` / `experiments/report.py`
+
+Round-robins N runs per arm across the 12 fixture transcripts (satisfying
+both "N=30 per arm" and "over the fixture transcripts" at once), collecting
+the full METRICS TO COLLECT PER RUN set per run, and rendering a Markdown +
+matplotlib chart report (`--fake`-mode output verified during development;
+see `experiments/run_ab.py`'s own docstring for the one honest
+approximation this phase makes: "context growth per turn" has no direct
+per-turn breakdown available from this codebase's telemetry — `AgentSpan`
+records one cumulative usage figure per agent call, not a per-turn one
+inside a multi-turn `Runner.run` — so `total_tokens / tool_call_count` is
+used as a documented stand-in, comparable the same way across both arms).
+Chart form/color choices followed the dataviz skill: one single-axis
+grouped-bar chart per scalar metric (mixing tokens/cost/latency/counts on
+one y-axis would be the #1 dual-axis anti-pattern), the validated default
+palette's slots 1/2 (blue/orange) for the two arms in fixed order, and a
+Markdown table twin for every chart. Like the UI's live-mode smoke test
+(Phase 9) and the full approve flow (Phase 9), a REAL run needs a real
+`OPENAI_API_KEY` this sandbox doesn't have — `--fake` (README.md) proves
+the scripts and the harness's tool-calling loop work end-to-end, not a
+governance-board-ready finding.
+
 ## Phase plan (actual sequence, as given phase-by-phase — supersedes any earlier guess)
 
 Each phase brief so far has been delivered independently and hasn't matched
@@ -1195,8 +1295,12 @@ new phase arrives rather than trusting the remainder.
    scenarios, each producing a schema-valid, clearly-flagged output;
    fallback lives in the schema (confidence_adjustments,
    fallbacks_applied, agent_context_notes), never in a bare except block.
-11. Not yet specified beyond the original draft guess (`experiments/` for
-   offline tuning) — don't plan around it.
+11. **Done.** A/B measurement: bounded pipeline vs open harness
+   (`orchestration/harness.py`, `experiments/run_ab.py`, `experiments/report.py`)
+   — see "A/B measurement" below. `SupervisorInput.orchestration_mode`'s
+   `open_harness` value finally has a real implementation, on the exact
+   same policy engine as the bounded arm. Phase 11 of a stated 12 — one
+   phase brief still to come; don't assume this is the end.
 
 ## Fixture transcripts (`fixtures/transcripts/`)
 
@@ -1615,3 +1719,64 @@ commands directly (see Makefile).
   never on `agents/` or `orchestration/bounded.py`.
 - Out of scope, as specified: no A/B harness, no new features beyond the
   three named modules and the six fault scenarios' handling.
+
+## Phase 11 acceptance status
+
+- `pytest` passes (414 tests total; 4 new — `tests/e2e/test_ab_parity.py`):
+  ACCEPTANCE 1 asserted structurally (`model_dump(exclude={"orchestration_mode"})`
+  equality between the two envelopes, checked *before* either pipeline
+  ever runs — a test that only compared outputs could pass even if the
+  two envelopes had quietly drifted apart); ACCEPTANCE 4 (zero policy
+  violations) asserted directly against both arms' `blocked_candidates` /
+  `recommendations` overlap, plus a dedicated test for the harness's
+  worst case (it gathers no evidence at all) still routing through the
+  identical policy hard filter. Existing regression coverage
+  (`tests/e2e/test_bounded_pipeline.py` and friends — 63 tests across
+  `tests/e2e`, `tests/chaos`, `tests/ui`, `tests/integration`) re-passed
+  unchanged after the `orchestration/bounded.py` refactor into
+  `queries.py`/`fallbacks.py`/`assemble.py`, confirming the extraction was
+  behaviour-preserving, not just structurally appealing.
+- `mypy --strict` and `ruff` both extended to cover `experiments/` (78
+  source files for mypy) and pass clean. One deliberate design choice to
+  get there: `experiments/run_ab.py`'s `--fake` path imports
+  `tests/support/fake_model.py` and `tests/e2e/support.py` via
+  `importlib.import_module` (typed `Any`) rather than a static `from
+  tests... import` — a static import would have pulled
+  `tests/support/fake_model.py`'s own (separately-scoped, never
+  previously strict-checked) typing issues into `experiments/`'s newly
+  strict-checked graph; this way experiments/ owns its own strictness
+  without inheriting tests/'s.
+- `matplotlib>=3.9` added as a new `experiments` extra
+  (`pyproject.toml`'s `[project.optional-dependencies]`), not a core
+  dependency — nothing in `src/churnguard/` imports it; `make install` now
+  syncs both `dev` and `experiments` extras.
+- No contract changes this phase. `agents/supervisor.py::build_supervisor_tools`
+  / `SUPERVISOR_SPEC` / `SUPERVISOR_INSTRUCTIONS` / `evaluate_policy` (the
+  Phase 7 open_harness stub) were removed, not deprecated in place —
+  confirmed via grep that nothing outside that module referenced them
+  before deleting; `render_recommendation_copy` and `SUPERVISOR_MODEL`
+  (still used by `orchestration/assemble.py`) were kept.
+- `orchestration/runner.py::run_once` and `agents/base.py::run_agent`
+  gained an additive, optional `max_turns` parameter (`None` for every
+  pre-Phase-11 caller, preserving the SDK's own default of 10) — the one
+  change to shared agent infrastructure this phase needed, for
+  `orchestration/harness.py`'s "max turns bounded for safety."
+- Verified manually (not via an automated test, matching the phase
+  brief's own test list, which asks only for `test_ab_parity.py`):
+  `python -m experiments.run_ab --n 30 --fake` followed by
+  `python -m experiments.report` produces a complete Markdown report with
+  5 charts (4 per-metric bar charts with error bars, 1 reproducibility
+  chart) against a real seeded database. The `--fake` run's own honest
+  finding: with a single fixed worked-example account and deterministic
+  model doubles, the open harness's top-ranked offer was exactly as
+  reproducible as the bounded pipeline's (1 distinct top offer per
+  fixture in both arms) — the report states this as a partial
+  contradiction of the phase brief's own expected finding, rather than
+  forcing the expected narrative, per the brief's explicit "report what
+  you actually measure, including if it contradicts this." A real,
+  measured, un-hypothesized source of open-harness nondeterminism *was*
+  found during development regardless — see "An observed source of
+  open-harness variance" above — just not one that changed the top offer
+  for this specific account.
+- Out of scope, as specified: no new features beyond
+  `orchestration/harness.py` and the two `experiments/` scripts.

@@ -65,3 +65,33 @@ notes): the approve -> execute -> replay -> reject-unknown-approval loop,
 driven through `ui/agent_desktop.py`'s own live-mode functions against a
 real running FastAPI server, works exactly as above for every step that
 doesn't require a live LLM call.
+
+## A/B experiment: bounded pipeline vs open harness (Phase 11)
+
+```
+make ab-experiment
+```
+
+runs N=30 per arm (`orchestration/bounded.py` vs `orchestration/harness.py`)
+over the 12 fixture transcripts and writes a Markdown + chart report to
+`experiments/report/REPORT.md`. Like the UI's live smoke test above, this
+needs a real `OPENAI_API_KEY` to produce meaningful variance/cost data -
+`orchestration/harness.py`'s Supervisor loop is a real LLM call, and this
+sandbox has neither the key nor network access to run it live.
+
+Without a key, run the same scripts against the deterministic test doubles
+instead - useful for confirming the scripts and the harness's tool-calling
+loop work end-to-end, not for a real governance-board finding (the doubles
+are fixed-token, zero-temperature stand-ins - real variance needs a real
+model):
+
+```
+python -m experiments.run_ab --n 12 --fake
+python -m experiments.report
+```
+
+See `experiments/run_ab.py` and `experiments/report.py`'s own docstrings
+for the exact metric definitions and the one documented approximation
+("context growth per turn" - this codebase's telemetry records one
+cumulative usage figure per agent call, not a per-turn breakdown inside a
+multi-turn `Runner.run`).

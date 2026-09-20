@@ -15,6 +15,7 @@ partially-built AgentResult.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 from agents import Agent, RunConfig, Runner
 
@@ -37,8 +38,15 @@ async def run_once[T](
     model: str,
     run_config: RunConfig | None = None,
     detect_missing_evidence: Callable[[T], list[str]] | None = None,
+    max_turns: int | None = None,
 ) -> AgentResult[T]:
+    """max_turns (Phase 11): None preserves the SDK's own default (10) for
+    every existing caller - only orchestration/harness.py's open-ended
+    Supervisor loop passes an explicit, tighter cap ("max turns bounded
+    for safety"), so this is never added to Runner.run's kwargs unless the
+    caller genuinely asked for a cap."""
     resolved_run_config = run_config if run_config is not None else RunConfig(tracing_disabled=True)
+    run_kwargs: dict[str, Any] = {} if max_turns is None else {"max_turns": max_turns}
 
     async with AgentSpan(
         agent.name,
@@ -47,7 +55,7 @@ async def run_once[T](
         span_id=run_context.agent_span_id,
     ) as span:
         run_result = await Runner.run(
-            agent, input_text, context=run_context, run_config=resolved_run_config
+            agent, input_text, context=run_context, run_config=resolved_run_config, **run_kwargs
         )
         usage = run_result.context_wrapper.usage
         span.record_usage(tokens_in=usage.input_tokens, tokens_out=usage.output_tokens)
