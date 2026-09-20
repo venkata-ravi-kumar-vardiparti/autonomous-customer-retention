@@ -39,6 +39,7 @@ from collections.abc import Awaitable
 from agents import RunContextWrapper, Tool, function_tool
 from pydantic import BaseModel, ConfigDict
 
+from churnguard.contracts.customer import CustomerContextRequest
 from churnguard.data.repositories import billing_repo, catalog_repo, customer_repo, promo_repo
 from churnguard.orchestration.context import RunContext
 from churnguard.telemetry.cost import TOOL_CALL_MODEL
@@ -83,8 +84,20 @@ class AccountSummary(BaseModel):
     excluded_fields: list[str]
 
 
+def _customer_request(ctx: RunContextWrapper[RunContext]) -> CustomerContextRequest:
+    """RunContext.request is a union across agents - narrow it here, once,
+    rather than in every tool. A customer tool invoked against the wrong
+    kind of run is a real bug, not something to paper over.
+    """
+    request = ctx.context.request
+    assert isinstance(request, CustomerContextRequest), (
+        f"customer_tools invoked with a non-customer RunContext.request: {type(request)!r}"
+    )
+    return request
+
+
 def _require_domain(ctx: RunContextWrapper[RunContext], domain: str) -> None:
-    if domain not in ctx.context.request.requested_domains:
+    if domain not in _customer_request(ctx).requested_domains:
         raise DomainNotAuthorizedError(domain)
 
 
@@ -106,8 +119,9 @@ async def _traced_repo_call[T](
 
 
 async def _get_account_summary_impl(ctx: RunContextWrapper[RunContext]) -> str:
+    request = _customer_request(ctx)
     result = await _traced_repo_call(
-        ctx, "get_account_summary", customer_repo.get_account_context(ctx.context.request)
+        ctx, "get_account_summary", customer_repo.get_account_context(request)
     )
     ctx.context.evidence.extend(
         e for e in result.evidence if e.evidence_id.startswith("EVID_ACCT_")
@@ -124,19 +138,17 @@ async def _get_account_summary_impl(ctx: RunContextWrapper[RunContext]) -> str:
 
 async def _get_billing_impl(ctx: RunContextWrapper[RunContext]) -> str:
     _require_domain(ctx, DOMAIN_BILLING)
-    result = await _traced_repo_call(
-        ctx, "get_billing", billing_repo.get_billing(ctx.context.request.account_ref)
-    )
+    account_ref = _customer_request(ctx).account_ref
+    result = await _traced_repo_call(ctx, "get_billing", billing_repo.get_billing(account_ref))
     ctx.context.evidence.extend(result.evidence)
     return result.data.model_dump_json()
 
 
 async def _get_payment_history_impl(ctx: RunContextWrapper[RunContext]) -> str:
     _require_domain(ctx, DOMAIN_PAYMENT_HISTORY)
+    account_ref = _customer_request(ctx).account_ref
     result = await _traced_repo_call(
-        ctx,
-        "get_payment_history",
-        billing_repo.get_payment_history(ctx.context.request.account_ref),
+        ctx, "get_payment_history", billing_repo.get_payment_history(account_ref)
     )
     ctx.context.evidence.extend(result.evidence)
     return result.data.model_dump_json()
@@ -144,8 +156,9 @@ async def _get_payment_history_impl(ctx: RunContextWrapper[RunContext]) -> str:
 
 async def _get_plan_profile_impl(ctx: RunContextWrapper[RunContext]) -> str:
     _require_domain(ctx, DOMAIN_PLAN_PROFILE)
+    account_ref = _customer_request(ctx).account_ref
     result = await _traced_repo_call(
-        ctx, "get_plan_profile", catalog_repo.get_plan_profile(ctx.context.request.account_ref)
+        ctx, "get_plan_profile", catalog_repo.get_plan_profile(account_ref)
     )
     ctx.context.evidence.extend(result.evidence)
     return result.data.model_dump_json()
@@ -153,10 +166,9 @@ async def _get_plan_profile_impl(ctx: RunContextWrapper[RunContext]) -> str:
 
 async def _get_device_financing_impl(ctx: RunContextWrapper[RunContext]) -> str:
     _require_domain(ctx, DOMAIN_DEVICE_FINANCING)
+    account_ref = _customer_request(ctx).account_ref
     result = await _traced_repo_call(
-        ctx,
-        "get_device_financing",
-        catalog_repo.get_device_financing(ctx.context.request.account_ref),
+        ctx, "get_device_financing", catalog_repo.get_device_financing(account_ref)
     )
     ctx.context.evidence.extend(result.evidence)
     return json.dumps([line.model_dump(mode="json") for line in result.data])
@@ -164,8 +176,9 @@ async def _get_device_financing_impl(ctx: RunContextWrapper[RunContext]) -> str:
 
 async def _get_usage_by_line_impl(ctx: RunContextWrapper[RunContext]) -> str:
     _require_domain(ctx, DOMAIN_USAGE)
+    account_ref = _customer_request(ctx).account_ref
     result = await _traced_repo_call(
-        ctx, "get_usage_by_line", catalog_repo.get_usage_by_line(ctx.context.request.account_ref)
+        ctx, "get_usage_by_line", catalog_repo.get_usage_by_line(account_ref)
     )
     ctx.context.evidence.extend(result.evidence)
     return json.dumps(result.data)
@@ -173,10 +186,9 @@ async def _get_usage_by_line_impl(ctx: RunContextWrapper[RunContext]) -> str:
 
 async def _get_active_promotions_impl(ctx: RunContextWrapper[RunContext]) -> str:
     _require_domain(ctx, DOMAIN_PROMOTIONS)
+    account_ref = _customer_request(ctx).account_ref
     result = await _traced_repo_call(
-        ctx,
-        "get_active_promotions",
-        promo_repo.get_active_promotions(ctx.context.request.account_ref),
+        ctx, "get_active_promotions", promo_repo.get_active_promotions(account_ref)
     )
     ctx.context.evidence.extend(result.evidence)
     return json.dumps(result.data)

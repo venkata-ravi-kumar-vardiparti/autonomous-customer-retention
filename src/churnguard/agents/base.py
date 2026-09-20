@@ -1,11 +1,12 @@
 """Shared agent factory + invocation wrapper - the template every later
 ChurnGuard agent (Conversation, Competitor, Offer Policy renderer,
-Supervisor) copies. This phase proves the pattern on exactly one agent
-(Customer 360).
+Supervisor) copies. Phase 4 proved the pattern on Customer 360; Phase 5
+(Conversation) extends it with input_guardrails rather than inventing a
+second way to build/run an agent.
 
 Layered on orchestration/runner.py's run_once(), which does exactly one
 Runner.run() call and assembles an AgentResult[T] from it. This module adds
-the two things a *single* run_once() call can't do on its own:
+what a *single* run_once() call can't do on its own:
 
 - retries a schema-invalid model output exactly once (Runner.run raises
   agents.ModelBehaviorError for malformed/invalid-schema JSON; there is no
@@ -17,16 +18,28 @@ the two things a *single* run_once() call can't do on its own:
 - enforces RunContext.deadline_ms as a hard wall-clock budget across both
   attempts combined, via asyncio.wait_for, converting a timeout into
   DeadlineExceededError.
+- converts a tripped agents.InputGuardrailTripwireTriggered (e.g.
+  guardrails/injection.py's block-tier verdict) into InputBlockedError -
+  never retried, since the same input would trip the same guardrail again.
 """
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-from agents import Agent, AgentOutputSchema, Model, ModelBehaviorError, RunConfig, Tool
+from agents import (
+    Agent,
+    AgentOutputSchema,
+    InputGuardrail,
+    InputGuardrailTripwireTriggered,
+    Model,
+    ModelBehaviorError,
+    RunConfig,
+    Tool,
+)
 
 from churnguard.contracts.envelope import AgentResult
 from churnguard.orchestration.context import RunContext
@@ -39,6 +52,20 @@ class SchemaViolationError(Exception):
 
 class DeadlineExceededError(Exception):
     """The agent run did not complete within RunContext.deadline_ms."""
+
+
+class InputBlockedError(Exception):
+    """An input_guardrail tripped its tripwire before the model was ever called.
+
+    guardrail_output_info carries whatever the guardrail's
+    GuardrailFunctionOutput.output_info was, so a caller can build a
+    specific degraded AgentResult (agents/base.py can't do this generically
+    - it doesn't know what an empty/blocked T looks like for every agent).
+    """
+
+    def __init__(self, message: str, *, guardrail_output_info: Any = None) -> None:
+        super().__init__(message)
+        self.guardrail_output_info = guardrail_output_info
 
 
 @dataclass(frozen=True)
@@ -57,6 +84,7 @@ class AgentSpec[T]:
     tools: list[Tool]
     model: str
     detect_missing_evidence: Callable[[T], list[str]] | None = None
+    input_guardrails: list[InputGuardrail[Any]] = field(default_factory=list)
 
 
 def build_agent(
@@ -81,6 +109,7 @@ def build_agent(
         tools=spec.tools,
         output_type=AgentOutputSchema(spec.output_type, strict_json_schema=False),
         model=model_override if model_override is not None else spec.model,
+        input_guardrails=spec.input_guardrails,
     )
 
 
@@ -108,6 +137,13 @@ async def run_agent[T](
                     run_config=run_config,
                     detect_missing_evidence=spec.detect_missing_evidence,
                 )
+            except InputGuardrailTripwireTriggered as exc:
+                # Never retried: the same input would trip the same guardrail again.
+                raise InputBlockedError(
+                    f"{spec.name}'s input was blocked by "
+                    f"{exc.guardrail_result.guardrail.get_name()!r}",
+                    guardrail_output_info=exc.guardrail_result.output.output_info,
+                ) from exc
             except ModelBehaviorError as exc:
                 if attempts > max_retries:
                     raise SchemaViolationError(
@@ -130,6 +166,7 @@ async def run_agent[T](
 __all__ = [
     "AgentSpec",
     "DeadlineExceededError",
+    "InputBlockedError",
     "SchemaViolationError",
     "build_agent",
     "run_agent",

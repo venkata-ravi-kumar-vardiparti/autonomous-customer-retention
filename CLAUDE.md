@@ -475,6 +475,95 @@ hardcoding per-account expected JSON or depending on a live model).
 `tests/unit/conftest.py` in this phase so `tests/golden/` (and any future
 top-level test package) gets it too, without duplicating it.
 
+## Conversation agent & prompt-injection defence (`agents/conversation.py`, `guardrails/`, `orchestration/windowing.py`, built Phase 5)
+
+Turns a live transcript into typed signals (`ConversationSignals`). Unlike
+Customer 360, this agent *interprets* — but everything it reads is
+customer-authored, hence untrusted, so defence is structural, not a prompt
+added on top.
+
+### Two-layer prompt-injection defence (`guardrails/injection.py`)
+
+1. **`sanitize_transcript()`** runs *before* any transcript text is
+   embedded in a prompt. A small, deterministic, regex-based classifier
+   (never an LLM — an LLM classifier would be circularly vulnerable to the
+   very attack it's meant to catch, same reasoning as the Offer Policy
+   engine keeping verdicts out of model hands) tags every turn `allow` /
+   `allow_with_quarantine` / `block`. A quarantined or blocked turn's raw
+   text is replaced with a neutral placeholder naming only its
+   `sha256` content hash — the raw text never reaches a prompt, structurally,
+   not by instruction. `allow_with_quarantine` turns still let the run
+   continue (genuine signals elsewhere in the window are still extracted);
+   the matching verification task (`f"verify_{category}"`) is merged into
+   `ConversationSignals.verification_tasks` **deterministically by code**
+   after the run, never left to model compliance.
+2. **`transcript_injection_guardrail`**, a real `@input_guardrail` /
+   `InputGuardrail` (`run_in_parallel=False`, confirmed empirically against
+   the installed SDK: a sequential guardrail that trips its tripwire
+   results in **zero** calls to the model). It does not re-classify text —
+   the dangerous content it would need to see has already been redacted by
+   (1) — it enforces the verdict (1) already computed, read from
+   `RunContext.guardrail_verdict` (the caller sets this before `Runner.run`,
+   since the SDK invokes guardrail functions itself and they can't accept
+   extra arguments). `verdict == "block"` trips the tripwire;
+   `agents/base.py::run_agent` converts the resulting
+   `InputGuardrailTripwireTriggered` into `InputBlockedError` (never
+   retried — the same input would trip the same guardrail again).
+   `agents/conversation.py::run_conversation_agent` catches that and
+   returns a degraded `AgentResult` (`status="insufficient_evidence"`,
+   `data=None`) rather than propagating an exception to its caller.
+
+Both layers exist because either alone is fragile: sanitization alone has
+no hard stop if a future caller forgets to wire the guardrail in; the
+guardrail alone can only allow/deny, it can't express "continue, with this
+part redacted." Pattern set and rationale for each category live in
+`injection.py`'s module docstring; the 30-case adversarial corpus is
+`guardrails/corpus/injections.jsonl`, one JSON object per line
+(`id`, `category`, `verdict`, `text`) — extend the patterns and the corpus
+together when a new attack shape is found.
+
+### `agents/base.py` extensions (additive, Customer 360 unaffected)
+
+`AgentSpec` gained `input_guardrails: list[InputGuardrail] = []`, threaded
+into `Agent(input_guardrails=...)`. `run_agent()` gained one more
+exception mapping: `InputGuardrailTripwireTriggered` → `InputBlockedError`
+(carries the guardrail's `output_info`), checked before the existing
+`ModelBehaviorError` retry logic and never retried itself.
+
+### `RunContext` generalized (flagged for exactly this in Phase 4)
+
+`RunContext.request` is now `CustomerContextRequest | ConversationInput`
+(`AgentRequest` alias, `orchestration/context.py`). Nothing generic
+(`agents/base.py`, `orchestration/runner.py`) ever reads `.request` — only
+agent-specific code does, and must narrow first;
+`tools/customer_tools.py::_customer_request()` is the one narrowing point
+for Customer 360. Also gained `guardrail_verdict: str | None` — the
+pre-computed-verdict side channel described above, generic enough for any
+future agent with its own `@input_guardrail`.
+
+### Transcript windowing (`orchestration/windowing.py`)
+
+`WindowState(processed_turn_count, prior_signals)` + `next_window()` +
+`advance()`. Each call to the Conversation agent gets only the turns since
+the last processed point (`ConversationInput.transcript_window` already
+models "a window", not "the transcript so far" — this module is just the
+bookkeeping of where the last one ended) plus `prior_signals`, the
+previous window's own structured output — the model is instructed to treat
+its new output as the cumulative picture for the whole call, merging
+`prior_signals` with what's new rather than starting over. This is what
+keeps input size flat as a call runs long, instead of growing with total
+call length.
+
+### Span references are computed, not asked for
+
+`agents/conversation.py::build_input_text()` prefixes every rendered
+transcript line with its own `[MM:SS]`-format span reference (elapsed time
+since `window_start_ts`), computed in code. Instructions tell the model to
+copy these labels verbatim into `span_refs`, never to compute its own —
+LLMs are unreliable at timestamp arithmetic; pushing anything code can do
+deterministically out of the model's hands is the same philosophy as the
+Offer Policy engine and Customer 360's tool-does-the-fetching design.
+
 ## Phase plan (actual sequence, as given phase-by-phase — supersedes any earlier guess)
 
 Each phase brief so far has been delivered independently and hasn't matched
@@ -492,11 +581,15 @@ new phase arrives rather than trusting the remainder.
 4. **Done.** Customer 360 agent (`agents/customer.py`) + the shared
    agents-SDK template (`agents/base.py`, `orchestration/`, `tools/customer_tools.py`)
    every later agent copies — see "Agents SDK template" below.
-5-11. Not yet specified. Original draft guess (Conversation agent,
-   Competitor agent, Supervisor orchestration, confidence/telemetry,
-   approval workflow, execution boundary, FastAPI, Streamlit UI) is
-   unconfirmed and increasingly unlikely to match the real order — don't
-   plan around it.
+5. **Done.** Conversation agent (`agents/conversation.py`) + prompt-injection
+   defence (`guardrails/injection.py`) + transcript windowing
+   (`orchestration/windowing.py`) — see "Conversation agent & prompt-injection
+   defence" below. Extends the Phase 4 template (input_guardrails on
+   `AgentSpec`, `InputBlockedError`) rather than inventing a second one.
+6-11. Not yet specified. Original draft guess (Competitor agent, Supervisor
+   orchestration, confidence/telemetry, approval workflow, execution
+   boundary, FastAPI, Streamlit UI) is unconfirmed and increasingly
+   unlikely to match the real order — don't plan around it.
 11. Streamlit UI (`ui/`) + end-to-end demo, `experiments/` for offline
     tuning.
 
@@ -640,3 +733,44 @@ commands directly (see Makefile).
   `tests/unit/conftest.py`) so `tests/golden/` gets it too.
 - Out of scope, as specified: no other agents, no Supervisor, no
   orchestration beyond a single run.
+
+## Phase 5 acceptance status
+
+- `pytest` passes (292 tests total; 113 new —
+  `tests/unit/test_injection_guardrail.py`, `test_windowing.py`,
+  `tests/golden/test_conversation_agent.py`, `test_conversation_variance.py`,
+  `tests/integration/test_conversation_windowing.py`): the brief's exact
+  reference transcript reproduces byte-for-byte (3 intents, `unit="ambiguous"`,
+  `bill_increase` 50.00 `precision="approximate"`, `customer_flagged_separate=true`,
+  and `[01:24]` quarantined into `verification_tasks=["verify_prior_commitment_claim"]`);
+  the ADVERSARIAL GATE runs all 30 corpus cases through the real
+  `classify_text` → `sanitize_transcript` → `build_input_text` →
+  `run_conversation_agent` pipeline — every `block`-tier case is asserted
+  to never reach the model (`Model.get_response` raises `AssertionError`
+  if called) and every case's raw text is asserted absent from the
+  rendered `<transcript>` block; the two known-injection fixtures (03, 11)
+  are asserted blocked and the other 10 are asserted not blocked;
+  multi-intent fixtures are asserted to carry ≥2 intents with distinct
+  `span_refs`; windowed input size is asserted flat (<20-char band) across
+  a simulated 15-turn call, contrasted against the un-windowed alternative
+  (which grows >10x over the same span); a 10-run variance check asserts
+  the intent **set** is identical across runs and confidence values fall
+  in a range, never asserting an exact float — see that test's docstring
+  for why a scripted model (no live model is available in this
+  environment) is the honest limit of what "variance" can mean here.
+- `mypy --strict` passes on `src/churnguard/contracts`, `src/churnguard/data`,
+  `src/churnguard/policy`, `src/churnguard/telemetry`, `src/churnguard/orchestration`,
+  `src/churnguard/agents`, `src/churnguard/tools` **and** `src/churnguard/guardrails`
+  (Makefile/CI updated).
+- `ruff check` passes on `src`, `tests`, `scripts`.
+- Followed the Phase 4 template rather than inventing a second one:
+  `AgentSpec`/`build_agent`/`run_agent` gained `input_guardrails` and
+  `InputBlockedError` (additive; Customer 360's spec is unaffected, its
+  `input_guardrails` defaults to empty); `RunContext.request` generalized
+  to a union exactly as flagged in Phase 4's CLAUDE.md notes.
+- Out of scope, as specified: no Supervisor, no offers, no competitor
+  logic.
+- Fixed a `.gitignore` bug from Phase 3: the blanket `*.jsonl` rule (meant
+  only for the audit JSONL mirror) was silently excluding
+  `guardrails/corpus/injections.jsonl`. Narrowed to
+  `/churnguard_audit.jsonl` (the actual default mirror path).
