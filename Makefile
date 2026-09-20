@@ -10,7 +10,7 @@ lint:
 	uv run ruff check src tests scripts
 
 typecheck:
-	uv run mypy --strict src/churnguard/contracts src/churnguard/data src/churnguard/policy
+	uv run mypy --strict src/churnguard/contracts src/churnguard/data src/churnguard/policy src/churnguard/telemetry
 
 schemas:
 	uv run python scripts/export_schemas.py

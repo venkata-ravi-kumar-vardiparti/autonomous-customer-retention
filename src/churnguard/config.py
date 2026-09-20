@@ -18,6 +18,8 @@ class Settings:
     database_path: str
     default_policy_pack_version: str
     default_deadline_ms: int
+    audit_db_path: str
+    audit_log_path: str
 
 
 def load_settings() -> Settings:
@@ -26,4 +28,6 @@ def load_settings() -> Settings:
         database_path=os.environ.get("CHURNGUARD_DB_PATH", "churnguard.db"),
         default_policy_pack_version=os.environ.get("CHURNGUARD_POLICY_PACK_VERSION", "0.0.0"),
         default_deadline_ms=int(os.environ.get("CHURNGUARD_DEADLINE_MS", "2000")),
+        audit_db_path=os.environ.get("CHURNGUARD_AUDIT_DB_PATH", "churnguard_audit.db"),
+        audit_log_path=os.environ.get("CHURNGUARD_AUDIT_LOG_PATH", "churnguard_audit.jsonl"),
     )

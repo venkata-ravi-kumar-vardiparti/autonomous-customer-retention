@@ -316,6 +316,71 @@ the one place a genuinely wrong guess would be expensive to unwind, and
 it's a decision made in-package (not asked of the user) because it doesn't
 touch a frozen contract.
 
+## Telemetry spine (`telemetry/`, built Phase 3)
+
+Instrumentation built before the first agent exists, so nothing is ever
+retrofitted. Independent of `data/` and `policy/` — imports only
+`contracts/` and `config.py`.
+
+- **`tracer.py`** — `AgentSpan`, an async context manager: one per agent
+  call. Records `model`, `latency_ms`, `tokens_in`/`tokens_out` (via
+  `record_usage()`), `cost_usd` (via `cost.compute_cost_usd`) and
+  `cache_hit` into a `contracts.envelope.Telemetry` on exit; never swallows
+  an exception (`__aexit__` always returns `False`), recording `status:
+  "error"` first. `trace_id`/`span_id`/`parent_span_id` are **explicit**
+  constructor args, not inferred from the OpenAI Agents SDK's ambient
+  "current span" contextvar — agents-as-tools fan out concurrently, and an
+  `AgentEnvelope` can in principle carry its tracing fields across a
+  process boundary, so parent/child linkage has to survive independent of
+  call-stack nesting order. The SDK's own `Trace`/`Span` objects are still
+  created and explicitly parented (by looking up the SDK span object for
+  the given `parent_span_id`, not by trusting ambient context), so the
+  "layered over the OpenAI Agents SDK tracing" integration is real, not
+  decorative — but `export_trace(trace_id)` builds its nested tree from
+  this module's own process-local `SpanRecord` store, never from the SDK's
+  `Span.export()`. `set_trace_processors([_NullTracingProcessor()])` runs
+  at import time so no span data ever leaves the process (no network call,
+  regardless of whether `OPENAI_API_KEY` is set).
+- **`cost.py`** — `PRICE_TABLE_USD_PER_MILLION_TOKENS`, a static dict keyed
+  by model name; `compute_cost_usd(model, tokens_in, tokens_out)` is pure
+  arithmetic, no network lookups, rounded to 6 decimal places.
+  `UnknownModelPriceError` on a model with no table entry — a missing price
+  is fatal, never a silent zero-cost default.
+- **`audit.py`** — `write_audit_record()` writes one row to an `audit_log`
+  SQLite table **and** appends a matching line to a JSONL mirror.
+  **Redaction runs inside the writer**: every string field (`decision`,
+  `approver_ref`, `policy_pack_version`, each `evidence_id`) is passed
+  through `scrub()` — the same bare-10-digit / bare-13-19-digit regex
+  convention as the Governed Data Layer's leak gate
+  (`tests/unit/test_pii_leak.py`) — before it touches either the SQLite row
+  or the JSONL line, so a careless caller cannot bypass it by constructing
+  the record itself. The prompt is **never stored**: `write_audit_record()`
+  takes the raw `prompt` text only to SHA-256 it in memory
+  (`hash_prompt()`); only `prompt_hash` is persisted.
+
+### Why `telemetry/` owns its own SQLite file, not the Governed Data Layer's
+
+`data/schema.sql` already has an `audit_log` table (from Phase 0 scaffold),
+but with a different, incompatible shape (`audit_id, actor_ref, action,
+target_ref, occurred_at, detail` — no `prompt_hash`, `evidence_ids`,
+`policy_pack_version`, `approver_ref`, or `trace_id`) and it is never
+populated by any `data/` code. Reusing it was rejected: the Phase 3 brief
+says this track is independent and "depends only on `contracts/`", and the
+Governed Data Layer's only connection factory for anything outside
+`data/seed/generate.py` is deliberately **read-only**
+(`db.py::get_readonly_connection`, `file:...?mode=ro`) — an audit writer
+needs a writable connection, which `data/` intentionally does not export.
+So `audit.py` defines its own `SCHEMA_SQL` (also named `audit_log`, but
+with the Phase 3 column set) against its own DB file
+(`Settings.audit_db_path`, env `CHURNGUARD_AUDIT_DB_PATH`, default
+`churnguard_audit.db`) plus its own JSONL mirror path
+(`Settings.audit_log_path`, env `CHURNGUARD_AUDIT_LOG_PATH`, default
+`churnguard_audit.jsonl`). **Flag this if a later phase (approval/execution)
+expects a single unified audit store** — as built, `data/schema.sql`'s
+`audit_log` table and `telemetry/audit.py`'s `audit_log` table are two
+different tables in two different database files that happen to share a
+name.
+
 ## Phase plan (actual sequence, as given phase-by-phase — supersedes any earlier guess)
 
 Each phase brief so far has been delivered independently and hasn't matched
@@ -328,7 +393,9 @@ new phase arrives rather than trusting the remainder.
 2. **Done.** Offer Policy engine (`policy/`) — see "Offer Policy engine"
    below. Independent of `data/`: consumes `account_digest: dict`, never a
    repository.
-3-11. Not yet specified. Original draft guess (Conversation agent,
+3. **Done.** Telemetry spine (`telemetry/`) — see "Telemetry spine" below.
+   Independent of `data/` and `policy/`: consumes only `contracts/`.
+4-11. Not yet specified. Original draft guess (Conversation agent,
    Customer 360 agent, Competitor agent, Supervisor orchestration,
    confidence/telemetry, approval workflow, execution boundary, FastAPI,
    Streamlit UI) is unconfirmed and increasingly unlikely to match the
@@ -406,3 +473,28 @@ commands directly (see Makefile).
 - Confirmed independent of `data/`: zero `churnguard.data` imports anywhere
   under `policy/` (AST-checked, not just grepped).
 - Out of scope, as specified: no agent wrapper, no data access, no LLM.
+
+## Phase 3 acceptance status
+
+- `pytest` passes (140 tests total; 22 new — `tests/unit/test_tracer.py`,
+  `test_cost.py`, `test_audit_redaction.py`, and the new
+  `tests/integration/` package's `test_span_tree.py`): a three-level nested
+  `AgentSpan` call produces a correctly-shaped, correctly-parented
+  `export_trace` tree (plus a sibling-branch case); the SCRUBBING TEST logs
+  poisoned payloads containing a 16-digit card number and a 10-digit
+  account number through every string field of an audit record and asserts
+  neither appears in the SQLite file's raw bytes nor the JSONL mirror;
+  fixed-price-table cost arithmetic is hand-verified for zero tokens, exact
+  million-token rates, mixed counts, and 6-decimal rounding, plus an
+  unknown-model `KeyError` subclass; a prompt is asserted absent from both
+  storage forms while its SHA-256 (`hash_prompt`) is asserted present;
+  audit rows are read back through a **fresh** `aiosqlite` connection to
+  the same file path (simulating a process restart) and compare equal to
+  what was written.
+- `mypy --strict` passes on `src/churnguard/contracts`, `src/churnguard/data`,
+  `src/churnguard/policy` **and** `src/churnguard/telemetry` (Makefile/CI
+  updated).
+- `ruff check` passes on `src`, `tests`, `scripts`.
+- Confirmed independent: `telemetry/` imports only `contracts/` and
+  `config.py`, never `churnguard.data` or `churnguard.policy`.
+- Out of scope, as specified: no agents, no UI dashboards — spine only.

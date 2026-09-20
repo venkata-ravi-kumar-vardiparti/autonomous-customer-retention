@@ -24,7 +24,7 @@ jobs:
         run: uv run ruff check src tests scripts
 
       - name: Typecheck
-        run: uv run mypy --strict src/churnguard/contracts src/churnguard/data src/churnguard/policy
+        run: uv run mypy --strict src/churnguard/contracts src/churnguard/data src/churnguard/policy src/churnguard/telemetry
 
       - name: Test
         run: uv run pytest
