@@ -564,6 +564,133 @@ LLMs are unreliable at timestamp arithmetic; pushing anything code can do
 deterministically out of the model's hands is the same philosophy as the
 Offer Policy engine and Customer 360's tool-does-the-fetching design.
 
+## Competitor agent & offer generation (`agents/competitor.py`, `offers/`, `tools/competitor_tools.py`, built Phase 6)
+
+Grounds competitive comparison in curated, timestamped snapshots — never
+live scraping — and generates the candidate offers that feed the (already
+built, Phase 2) deterministic Offer Policy engine.
+
+### `offers/normalizer.py` — pure functions, no model, no I/O
+
+Same philosophy as the Offer Policy engine and Conversation agent's
+span-ref computation: anything code can compute deterministically stays
+out of the model's hands, so **the LLM must never compute a price**.
+
+- `normalize_like_for_like_monthly()` — a competitor's per-line headline
+  price → a like-for-like *total* for the account's own line count:
+  `base = per_line_price × line_count`, `+ HOTSPOT_PARITY_ADDON_USD (10.00)`
+  when the snapshot's `includes` lacks hotspot data, `+ estimated taxes/fees`
+  (`ESTIMATED_TAX_RATE_BY_GEOGRAPHY`, a small curated table like
+  `policy/packs/*.yaml`'s limits — 0.19 for `TX-DFW`, 0.15 default),
+  computed on the *base* monthly, not the addon-adjusted figure. Reference
+  case ($30/line × 4 lines, no hotspot, TX-DFW): 120.00 base + 10.00 addon +
+  22.80 tax = **152.80**; against a 198.43 current bill that's a **-45.63**
+  monthly delta — the same -45.63 Phase 2 hardcoded for its C4 fixture
+  (`tests/unit/policy_fixtures.py`), which is exactly the link Phase 6
+  reproduces end-to-end via `offers/generator.py`.
+- `compute_switching_costs()` / `compute_breakeven_months()` — plain
+  addition and division; breakeven is `None` (not infinite/negative) when
+  there's no positive monthly saving. Rounded to 1 decimal place (a rough
+  estimate, unlike currency amounts rounded to 2dp).
+- `reconcile_claim()` — takes the customer's claim plus a list of
+  `RateOption`s (label, per-line rate, line count) and finds the nearest
+  one to the claimed price. If the nearest option's line count doesn't
+  match the account's own, the claim is judged against a *different
+  pricing tier* than what the account would actually get (e.g. a
+  single-line rate quoted against a 4-line family plan) → `verdict:
+  "unverifiable"`, with an explanation naming which tier it actually
+  matched. Otherwise: within `CLAIM_MATCH_TOLERANCE_USD` (0.50) of the
+  account's own applicable rate → `"confirmed"`; claim higher →
+  `"overstated"`; lower → `"understated"`.
+- Freshness/confidence-penalty thresholds are **independent of, and
+  deliberately stricter than**, `data/freshness.py`'s 29/40-day boundary:
+  `FRESH_MAX_DAYS=29`, `AGING_MAX_DAYS=30` (so `age_days=41` → `"stale"`).
+  Competitor *pricing* moves faster than account data, so a comparison
+  over a month old is already stale, not merely aging. Penalty is a
+  non-negative magnitude to subtract from confidence (`fresh`→0.0,
+  `aging`→0.03, `stale`→0.08), matching
+  `CompetitorComparison.confidence_penalty`'s `Field(ge=0.0, le=1.0)` —
+  the phase brief's "-0.08" is the *effect*, not the stored sign.
+
+### `agents/competitor.py` — compute-then-override, same pattern as Phase 5's verification_tasks merge
+
+`run_competitor_agent()` runs the LLM (which sees only
+`tools/competitor_tools.py`'s two snapshot-query tools — no network tool,
+no customer-data tool bound; checked by
+`tests/unit/test_generator.py::test_competitor_agent_has_no_network_capable_tool`
+via an AST import scan of `tools/competitor_tools.py`, same convention as
+`test_policy_engine.py`'s no-data-import check), then **overwrites** every
+numeric sub-field of the resulting `CompetitorComparison`
+(`resolved_offers`, `normalization`, `switching_costs`, `breakeven_months`,
+`claim_reconciliation`, `snapshot`, `freshness`, `confidence_penalty`) with
+values computed by `offers/normalizer.py` from the real snapshot data —
+never left to model compliance. When the resolved snapshot's freshness is
+`"stale"`, `AgentResult.status` is overridden to `"stale"` and confidence
+is reduced by `confidence_penalty` — the staleness penalty is emitted by
+this agent, in one place, not decided later by a Supervisor.
+
+### `CompetitorQuery` contract addition (confirmed during Phase 6)
+
+The Competitor agent has no customer-data tool (only
+`data/competitor_repo` via `tools/competitor_tools.py`), so it cannot look
+up an account's device-financing payoff itself. `CompetitorQuery`
+(`contracts/competitor.py`) gained `current_monthly: float` (required —
+there's no sensible default for the baseline the agent compares against)
+and two zero-defaulted, backward-compatible optional fields,
+`known_device_financing_payoff` and `known_one_time_switching_fees` — facts
+the caller (eventually the Supervisor, which will already have run
+Customer 360) hands in directly, the same way `ConversationInput` carries
+`prior_signals` pre-computed rather than re-derived. `make schemas` was
+rerun; only `schemas/churnguard.contracts.competitor.CompetitorQuery.json`
+changed.
+
+### `offers/generator.py` — deterministic, rule-based, never imports `churnguard.policy`
+
+`generate_candidates(account, signals, competitor)` proposes up to four
+candidates, in a fixed order, renumbered `C1..` from whichever actually
+apply (no gaps):
+
+1. **Credit reinstatement** — for every `reversible=True` cause in
+   `AccountContext.billing.delta_attribution`
+   (`REVERSIBLE_CAUSE_COMPONENTS` maps known cause names to
+   `RET_LOYALTY_CREDIT_REINSTATEMENT` / `BIL_AUTOPAY_DISCOUNT_RESTORE`,
+   falling back to a generic `RET_` code for an unrecognized cause).
+   Fully data-driven — the only category derived from real account
+   figures rather than a curated template.
+2. **Plan migration** — triggered by a non-empty `churn_signals` on a
+   `_PLUS`-tier plan; amount is a curated template constant
+   (`PLAN_MIGRATION_HOTSPOT_REDUCTION_MONTHLY = -38.44`), not derived from
+   account data — there's no plan-tier price table that produces this
+   figure from first principles, same as a policy pack limit being a
+   configured ceiling rather than a computed one.
+3. **Retention bundle** — triggered by non-empty `device_financing`;
+   `RET_LOYALTY_CREDIT` (-20.00, 12mo) + `FIN_DEVICE_CREDIT` (-18.00,
+   duration = the financed line's `months_remaining`) — again curated
+   template amounts, not derived.
+4. **Competitor price match** — triggered when the cheapest
+   `CompetitorComparison.resolved_offers` entry's (already like-for-like
+   adjusted) `monthly_price` is below `AccountContext.billing.current_bill`;
+   emits `PRC_COMPETITOR_PRICE_MATCH` at exactly that delta. **This
+   category is proposed here and blocked by the policy engine** (PRO-007
+   below `regional_manager` tier, RET-002 if the discount is too big a
+   percentage of the bill) — the separation between proposing and
+   evaluating is the point, not a bug to fix.
+
+Every emitted `OfferComponent.code` is checked against
+`KNOWN_COMPONENT_PREFIXES` (`RET_`, `BIL_`, `PLN_`, `FIN_`, `PRC_`) before
+being returned — an unrecognized prefix raises, rather than silently
+passing through the policy engine ungoverned (see "Offer component
+convention" in the Phase 2 section above).
+
+For the exact worked-example inputs (ACCT_****4471's real billing/
+financing shape, a churn signal, and the -45.63 reference competitor
+delta), `generate_candidates()` reproduces Phase 2's C1–C4 fixtures
+(`tests/unit/policy_fixtures.py`) byte-for-byte — verified by
+`tests/unit/test_generator.py`. `account_digest_from_context()` builds the
+`PolicyEvaluationRequest.account_digest` dict directly from
+`AccountContext` (`financing_active` = non-empty `device_financing`,
+`payment_current` = zero `current_past_due`).
+
 ## Phase plan (actual sequence, as given phase-by-phase — supersedes any earlier guess)
 
 Each phase brief so far has been delivered independently and hasn't matched
@@ -586,10 +713,14 @@ new phase arrives rather than trusting the remainder.
    (`orchestration/windowing.py`) — see "Conversation agent & prompt-injection
    defence" below. Extends the Phase 4 template (input_guardrails on
    `AgentSpec`, `InputBlockedError`) rather than inventing a second one.
-6-11. Not yet specified. Original draft guess (Competitor agent, Supervisor
-   orchestration, confidence/telemetry, approval workflow, execution
-   boundary, FastAPI, Streamlit UI) is unconfirmed and increasingly
-   unlikely to match the real order — don't plan around it.
+6. **Done.** Competitor agent (`agents/competitor.py`) + curated snapshot
+   normalization/switching-costs/breakeven (`offers/normalizer.py`) +
+   candidate offer generation (`offers/generator.py`) — see "Competitor
+   agent & offer generation" below.
+7-11. Not yet specified. Original draft guess (Supervisor orchestration,
+   confidence/telemetry, approval workflow, execution boundary, FastAPI,
+   Streamlit UI) is unconfirmed and increasingly unlikely to match the real
+   order — don't plan around it.
 11. Streamlit UI (`ui/`) + end-to-end demo, `experiments/` for offline
     tuning.
 
@@ -774,3 +905,48 @@ commands directly (see Makefile).
   only for the audit JSONL mirror) was silently excluding
   `guardrails/corpus/injections.jsonl`. Narrowed to
   `/churnguard_audit.jsonl` (the actual default mirror path).
+
+## Phase 6 acceptance status
+
+- `pytest` passes (329 tests total; 37 new — `tests/unit/test_normalizer.py`,
+  `test_generator.py`, `tests/integration/test_generator_to_policy.py`):
+  every `offers/normalizer.py` function is hand-verified to 2dp against the
+  phase brief's exact worked example (152.80 like-for-like monthly, -45.63
+  delta, 452.40 switching costs, 9.9 breakeven months, a claim reconciled
+  against the wrong pricing tier); freshness/confidence-penalty boundary
+  tests at exactly 29/30/31 days; `offers/generator.py::generate_candidates`
+  reproduces Phase 2's C1–C4 fixtures byte-for-byte for the matching
+  worked-example inputs, and is separately checked to skip each category
+  when its trigger condition doesn't hold (no reversible cause, no churn
+  signal, no financing, no competitor saving); an unknown component-code
+  prefix is asserted to raise rather than pass through ungoverned; the
+  competitor agent's tool list is asserted to contain exactly the two
+  snapshot-query tools, with an AST scan of `tools/competitor_tools.py`
+  confirming no network-library import and no `churnguard.data` import
+  beyond `competitor_repo`; the integration suite runs the real seeded DB
+  → `generate_candidates` → `policy.engine.evaluate` pipeline for all 10
+  golden accounts (candidates always come back 1:1 with verdicts, including
+  the zero-candidate case) and specifically re-derives Phase 2's exact
+  pass/pass_with_disclosure/pass/blocked verdict set end-to-end against a
+  DB-backed `AccountContext`.
+- `mypy --strict` passes on `src/churnguard/contracts`, `src/churnguard/data`,
+  `src/churnguard/policy`, `src/churnguard/telemetry`, `src/churnguard/orchestration`,
+  `src/churnguard/agents`, `src/churnguard/tools`, `src/churnguard/guardrails`
+  **and** `src/churnguard/offers` (Makefile/CI updated).
+- `ruff check` passes on `src`, `tests`, `scripts`.
+- Confirmed independent, per the brief: `offers/generator.py` never imports
+  `churnguard.policy` (it proposes candidates; the already-built policy
+  engine evaluates them; C4 is the deliberate example of that separation).
+  `tools/competitor_tools.py` imports only `churnguard.data.repositories`
+  (specifically `competitor_repo`) — no other domain repo, no network
+  library.
+- One contract addition, confirmed during this phase rather than asked of
+  the user up front (it doesn't touch a frozen field's type, only adds new
+  ones): `CompetitorQuery` gained a required `current_monthly` and two
+  zero-defaulted optional `known_*` switching-cost inputs — see
+  "Competitor agent & offer generation" above for why. `RunContext.request`
+  (`orchestration/context.py`) extended to a three-member union exactly as
+  flagged in Phase 5's notes. `make schemas` rerun; only
+  `schemas/churnguard.contracts.competitor.CompetitorQuery.json` changed —
+  verified via `git diff --stat schemas/` before committing.
+- Out of scope, as specified: no Supervisor, no ranking, no approval.

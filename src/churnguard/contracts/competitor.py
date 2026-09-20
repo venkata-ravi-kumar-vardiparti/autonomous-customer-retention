@@ -4,6 +4,16 @@ ASSUMPTIONS (see CLAUDE.md "ASSUMPTIONS TO CONFIRM"): ResolvedCompetitorOffer,
 Normalization, SwitchingCosts and ClaimReconciliation are not spelled out in
 the phase brief; shapes below are a starting point for confirmation before
 Phase 1.
+
+Phase 6 addition: CompetitorQuery gained `current_monthly` (required - the
+agent cannot compute monthly_savings/breakeven without a baseline) and two
+optional, zero-defaulted `known_*` switching-cost inputs. The Competitor
+agent has no customer-data tool (tools/competitor_tools.py wraps
+data/competitor_repo only - see CLAUDE.md "Competitor agent & offer
+generation"), so device-financing payoff and one-time switching fees have
+to arrive as already-known facts on the request, the same way
+ConversationInput.prior_signals arrives pre-computed rather than being
+re-derived.
 """
 
 from __future__ import annotations
@@ -28,9 +38,12 @@ class CompetitorQuery(BaseModel):
     carriers: list[str]
     line_count: int = Field(ge=1)
     current_plan_profile: str
+    current_monthly: float = Field(gt=0.0)
     customer_claim: CompetitorClaim | None
     switching_context: str
     max_snapshot_age_days: int = Field(ge=0)
+    known_device_financing_payoff: float = Field(default=0.0, ge=0.0)
+    known_one_time_switching_fees: float = Field(default=0.0, ge=0.0)
 
 
 class ResolvedCompetitorOffer(BaseModel):

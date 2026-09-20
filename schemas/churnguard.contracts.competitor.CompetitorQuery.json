@@ -55,6 +55,11 @@
       "title": "Carriers",
       "type": "array"
     },
+    "current_monthly": {
+      "exclusiveMinimum": 0.0,
+      "title": "Current Monthly",
+      "type": "number"
+    },
     "current_plan_profile": {
       "title": "Current Plan Profile",
       "type": "string"
@@ -72,6 +77,18 @@
     "geography": {
       "title": "Geography",
       "type": "string"
+    },
+    "known_device_financing_payoff": {
+      "default": 0.0,
+      "minimum": 0.0,
+      "title": "Known Device Financing Payoff",
+      "type": "number"
+    },
+    "known_one_time_switching_fees": {
+      "default": 0.0,
+      "minimum": 0.0,
+      "title": "Known One Time Switching Fees",
+      "type": "number"
     },
     "line_count": {
       "minimum": 1,
@@ -93,6 +110,7 @@
     "carriers",
     "line_count",
     "current_plan_profile",
+    "current_monthly",
     "customer_claim",
     "switching_context",
     "max_snapshot_age_days"

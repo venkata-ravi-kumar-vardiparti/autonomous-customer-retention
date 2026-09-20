@@ -208,6 +208,7 @@ def make_competitor_query() -> CompetitorQuery:
         carriers=["RivalCo"],
         line_count=3,
         current_plan_profile="PLAN_UNLIMITED_PLUS",
+        current_monthly=150.0,
         customer_claim=CompetitorClaim(
             carrier="RivalCo",
             price=45.0,
@@ -217,6 +218,8 @@ def make_competitor_query() -> CompetitorQuery:
         ),
         switching_context="cancel_request",
         max_snapshot_age_days=14,
+        known_device_financing_payoff=210.0,
+        known_one_time_switching_fees=30.0,
     )
 
 

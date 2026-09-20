@@ -23,17 +23,22 @@ channels into and out of a run:
 exactly this in Phase 4. Code that reads `.request` for a specific agent
 (e.g. tools/customer_tools.py) must narrow it first; nothing generic in
 agents/base.py or orchestration/runner.py ever touches this field.
+
+Phase 6 (Competitor) extends the union again with CompetitorQuery, exactly
+as flagged - tools/competitor_tools.py::_competitor_request narrows it the
+same way tools/customer_tools.py::_customer_request already does.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from churnguard.contracts.competitor import CompetitorQuery
 from churnguard.contracts.conversation import ConversationInput
 from churnguard.contracts.customer import CustomerContextRequest
 from churnguard.contracts.envelope import EvidenceRef
 
-AgentRequest = CustomerContextRequest | ConversationInput
+AgentRequest = CustomerContextRequest | ConversationInput | CompetitorQuery
 
 
 @dataclass
